@@ -35,6 +35,7 @@
 
   "containers": [
     {
+      "name": "motion-frames-rendercontainer",
       "class_name": "RenderContainer",
       "image": "./Dockerfile",
       "max_instances": 5,
