@@ -9,13 +9,14 @@
   // wrangler.jsonc
   "name": "hyperframes-cloudflare-template",
 
-  // BYOK AI generation. The user supplies their own OpenRouter key in the
-  // request body — the worker forwards it once and never persists it.
-  // Self-deployers: keep this as "true" to enable the prompt panel.
-  // Public-demo deployers: flip to "false" so visitors can't run the
-  // render container on your account from generated HTML.
+  // AI generation. The OpenRouter key is configured server-side with:
+  // wrangler secret put OPENROUTER_API_KEY
+  // Public-demo deployers: flip ENABLE_AI_GEN to "false" so visitors can't
+  // run the render container on your account from generated HTML.
   "vars": {
     "ENABLE_AI_GEN": "true"
+    // Optional model override:
+    // "OPENROUTER_MODEL": "google/gemini-3-flash-preview"
   },
 
   "assets": {

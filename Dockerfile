@@ -28,16 +28,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxfixes3 \
     libxkbcommon0 \
     libxrandr2 \
+    ffmpeg \
     wget \
     xdg-utils \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install hyperframes + ffmpeg-static, then symlink ffmpeg to a stable path.
-COPY container/package.json ./package.json
-RUN npm install --no-audit --no-fund \
+# Install hyperframes + ffmpeg-static. Debian ffmpeg supplies ffprobe, while
+# the static ffmpeg binary keeps the renderer path stable across base images.
+COPY container/package.json container/package-lock.json ./
+RUN npm ci --no-audit --no-fund \
   && ln -sf /app/node_modules/ffmpeg-static/ffmpeg /usr/local/bin/ffmpeg \
+  && ffprobe -version \
   && /usr/local/bin/ffmpeg -version
 
 # Pre-download chrome-headless-shell so the first render doesn't pay for it.

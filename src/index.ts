@@ -1,7 +1,7 @@
 import { getContainer } from "@cloudflare/containers";
 import { RenderContainer } from "./container.js";
 import manifest from "./composition-manifest.json";
-import { generateComposition, GenerateError } from "./lib/generate.js";
+import { DEFAULT_MODEL, generateComposition, GenerateError } from "./lib/generate.js";
 
 export { RenderContainer };
 
@@ -9,8 +9,12 @@ interface Env {
   ASSETS: Fetcher;
   RENDER_CONTAINER: DurableObjectNamespace<RenderContainer>;
   RENDERS: R2Bucket;
-  /** "true" enables BYOK AI generation. Off by default. Configure in wrangler.jsonc vars. */
+  /** "true" enables AI generation. Configure in wrangler.jsonc vars. */
   ENABLE_AI_GEN?: string;
+  /** Server-side OpenRouter API key. Set with `wrangler secret put OPENROUTER_API_KEY`. */
+  OPENROUTER_API_KEY?: string;
+  /** Optional OpenRouter model override. */
+  OPENROUTER_MODEL?: string;
 }
 
 const PREVIEW_HEADERS = {
@@ -20,7 +24,6 @@ const PREVIEW_HEADERS = {
 };
 
 const MAX_GENERATE_PROMPT_BYTES = 8 * 1024;
-const MAX_GENERATE_KEY_BYTES = 1024;
 const MAX_RENDER_HTML_BYTES = 2 * 1024 * 1024;
 
 const ENCODER = new TextEncoder();
@@ -146,16 +149,14 @@ async function handleRender(env: Env, req: Request): Promise<Response> {
 }
 
 interface GenerateRequestBody {
-  apiKey?: string;
   prompt?: string;
-  model?: string;
   durationSec?: number;
 }
 
 async function handleGenerate(env: Env, req: Request): Promise<Response> {
   if (env.ENABLE_AI_GEN !== "true") {
     return jsonError(
-      "AI generation is disabled on this deployment. Set ENABLE_AI_GEN=\"true\" in wrangler.jsonc vars to enable BYOK generation.",
+      "AI generation is disabled on this deployment. Set ENABLE_AI_GEN=\"true\" in wrangler.jsonc vars to enable generation.",
       403,
     );
   }
@@ -171,12 +172,6 @@ async function handleGenerate(env: Env, req: Request): Promise<Response> {
     return jsonError("invalid JSON body", 400);
   }
 
-  if (!body.apiKey || typeof body.apiKey !== "string") {
-    return jsonError("missing apiKey (your OpenRouter key)", 400);
-  }
-  if (body.apiKey.length > MAX_GENERATE_KEY_BYTES) {
-    return jsonError("apiKey too long", 400);
-  }
   if (!body.prompt || typeof body.prompt !== "string") {
     return jsonError("missing prompt", 400);
   }
@@ -184,13 +179,22 @@ async function handleGenerate(env: Env, req: Request): Promise<Response> {
     return jsonError(`prompt exceeds ${MAX_GENERATE_PROMPT_BYTES} bytes`, 413);
   }
 
+  const openRouterKey = env.OPENROUTER_API_KEY?.trim();
+  if (!openRouterKey) {
+    return jsonError(
+      "OpenRouter API key is not configured. Set OPENROUTER_API_KEY as a Cloudflare secret.",
+      500,
+    );
+  }
+
   const referer = req.headers.get("origin") ?? new URL(req.url).origin;
+  const configuredModel = env.OPENROUTER_MODEL?.trim() || undefined;
 
   try {
     const result = await generateComposition({
-      apiKey: body.apiKey,
+      apiKey: openRouterKey,
       prompt: body.prompt,
-      model: body.model,
+      model: configuredModel,
       durationSec: typeof body.durationSec === "number" ? body.durationSec : undefined,
       referer,
     });
@@ -248,7 +252,10 @@ export default {
 
     if (req.method === "GET" && pathname === "/api/config") {
       return Response.json(
-        { aiGenEnabled: env.ENABLE_AI_GEN === "true" },
+        {
+          aiGenEnabled: env.ENABLE_AI_GEN === "true",
+          modelLabel: env.OPENROUTER_MODEL?.trim() || DEFAULT_MODEL,
+        },
         { headers: { "cache-control": "public, max-age=300" } },
       );
     }

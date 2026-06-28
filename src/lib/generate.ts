@@ -19,7 +19,7 @@ export interface GenerateResult {
   lintErrors: Array<{ code: string; message: string }>;
 }
 
-const DEFAULT_MODEL = "google/gemini-3-flash-preview";
+export const DEFAULT_MODEL = "google/gemini-3-flash-preview";
 const DEFAULT_MAX_RETRIES = 2;
 const MAX_OUTPUT_TOKENS = 16000;
 
@@ -108,8 +108,8 @@ async function callOpenRouter(
 // rule throws on every inline script in Workers, so filter that one variant —
 // Chrome inside the render container catches real syntax errors at render time.
 // The malformed-close-tag variant of the same code (regex-based) still runs.
-function lintFiltered(html: string): Array<{ code: string; message: string }> {
-  const result = lintHyperframeHtml(html, { filePath: "composition.html" });
+async function lintFiltered(html: string): Promise<Array<{ code: string; message: string }>> {
+  const result = await lintHyperframeHtml(html, { filePath: "composition.html" });
   return result.findings
     .filter(
       (f) =>
@@ -145,7 +145,7 @@ export async function generateComposition(opts: GenerateOptions): Promise<Genera
       { role: "user", content: userPrompt },
     ], { temperature: 0.7, ...callOpts }),
   );
-  let lintErrors = lintFiltered(html);
+  let lintErrors = await lintFiltered(html);
 
   for (let retry = 0; retry < maxRetries && lintErrors.length > 0; retry++) {
     const errorList = lintErrors
@@ -168,7 +168,7 @@ Return ONLY the fixed HTML — no explanations, no markdown fences. Start with <
     ], { temperature: 0.3, ...callOpts });
     attempts++;
     html = stripMarkdownFence(fixText);
-    lintErrors = lintFiltered(html);
+    lintErrors = await lintFiltered(html);
   }
 
   return { html, model, attempts, durationMs: Date.now() - t0, lintErrors };

@@ -3,7 +3,7 @@
 // player can't stitch sub-compositions together at preview time without it.
 
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, readdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
 const COMP_DIR = process.env.PREVIEW_COMPOSITION_DIR ?? "compositions/cloudflare-intro";
@@ -18,19 +18,49 @@ async function listFiles(dir) {
     .sort();
 }
 
+async function readOptional(path, encoding) {
+  try {
+    return await readFile(path, encoding);
+  } catch (err) {
+    if (err && err.code === "ENOENT") return null;
+    throw err;
+  }
+}
+
+async function writeTextIfChanged(out, text, changedMessage) {
+  await mkdir(dirname(out), { recursive: true });
+  const existing = await readOptional(out, "utf8");
+  if (existing === text) {
+    console.log(`[build] ${out} unchanged`);
+    return;
+  }
+  await writeFile(out, text);
+  console.log(changedMessage);
+}
+
+async function copyIfChanged(src, dest) {
+  await mkdir(dirname(dest), { recursive: true });
+  const sourceBytes = await readFile(src);
+  const existingBytes = await readOptional(dest);
+  if (existingBytes && existingBytes.equals(sourceBytes)) {
+    console.log(`[build] ${dest} unchanged`);
+    return;
+  }
+  await copyFile(src, dest);
+  console.log(`[build] copied ${dest}`);
+}
+
 async function writeManifest() {
   const files = (await listFiles(compRoot)).filter(
     (rel) => !rel.startsWith("_bundled/"),
   );
   const out = "src/composition-manifest.json";
-  await mkdir(dirname(out), { recursive: true });
-  await writeFile(out, JSON.stringify({ dir: COMP_DIR, files }, null, 2) + "\n");
-  console.log(`[build] wrote ${out} with ${files.length} files from ${compRoot}`);
+  const text = JSON.stringify({ dir: COMP_DIR, files }, null, 2) + "\n";
+  await writeTextIfChanged(out, text, `[build] wrote ${out} with ${files.length} files from ${compRoot}`);
 }
 
 async function bundlePreview() {
   const out = "public/_bundled/preview.html";
-  await mkdir(dirname(out), { recursive: true });
   const tsxBin = join("node_modules", ".bin", "tsx");
 
   const html = await new Promise((resolveBundle, reject) => {
@@ -46,16 +76,13 @@ async function bundlePreview() {
     child.on("error", reject);
   });
 
-  await writeFile(out, html);
-  console.log(`[build] wrote ${out} (${html.length} bytes)`);
+  await writeTextIfChanged(out, html, `[build] wrote ${out} (${html.length} bytes)`);
 }
 
 async function copyPlayer() {
   const src = "node_modules/@hyperframes/player/dist/hyperframes-player.global.js";
   const dest = "public/_hyperframes/player.js";
-  await mkdir(dirname(dest), { recursive: true });
-  await copyFile(src, dest);
-  console.log(`[build] copied ${dest}`);
+  await copyIfChanged(src, dest);
 }
 
 await writeManifest();

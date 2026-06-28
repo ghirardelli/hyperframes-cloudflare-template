@@ -1,2 +1,6 @@
 # Local-only secrets. Copy to .dev.vars and fill in.
 # Production secrets go in Cloudflare dashboard or `wrangler secret put`.
+OPENROUTER_API_KEY=
+
+# Optional. Defaults to the app's server-side model when omitted.
+# OPENROUTER_MODEL=google/gemini-3-flash-preview

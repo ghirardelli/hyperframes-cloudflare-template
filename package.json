@@ -30,19 +30,20 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "test": "node scripts/verify-secret-ui.mjs",
     "typecheck": "tsc --noEmit",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
     "@cloudflare/containers": "^0.0.20",
-    "@hyperframes/core": "^0.5.3",
-    "@hyperframes/player": "^0.5.3"
+    "@hyperframes/core": "^0.7.17",
+    "@hyperframes/player": "^0.7.17"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260301.0",
-    "tsx": "^4.21.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.7.2",
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.105.0"
   },
   "engines": {
     "node": ">=22"
