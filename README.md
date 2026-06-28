@@ -92,6 +92,10 @@ npm run typecheck       # Wrangler typegen, then TypeScript
 npm run cf-typegen      # generate Cloudflare binding types
 ```
 
+Cloudflare's deploy command should be `npm run deploy`. A plain
+`wrangler deploy` points Wrangler at the source Worker entry and bypasses the
+TanStack/Vite virtual modules generated into `dist/server`.
+
 ## Project Layout
 
 ```txt
