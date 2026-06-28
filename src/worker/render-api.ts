@@ -1,14 +1,18 @@
 import { getContainer } from "@cloudflare/containers";
-import { RenderContainer } from "./container.js";
-import manifest from "./composition-manifest.json";
-import { DEFAULT_MODEL, generateComposition, GenerateError } from "./lib/generate.js";
 
-export { RenderContainer };
+import { createAuth } from "../auth";
+import manifest from "../composition-manifest.json";
+import { RenderContainer } from "../container";
+import { DEFAULT_MODEL, generateComposition, GenerateError } from "../lib/generate";
 
-interface Env {
+export interface WorkerEnv {
   ASSETS: Fetcher;
   RENDER_CONTAINER: DurableObjectNamespace<RenderContainer>;
   RENDERS: R2Bucket;
+  HYPERDRIVE?: Hyperdrive;
+  DATABASE_URL?: string;
+  BETTER_AUTH_SECRET?: string;
+  BETTER_AUTH_URL?: string;
   /** "true" enables AI generation. Configure in wrangler.jsonc vars. */
   ENABLE_AI_GEN?: string;
   /** Server-side OpenRouter API key. Set with `wrangler secret put OPENROUTER_API_KEY`. */
@@ -28,6 +32,51 @@ const MAX_RENDER_HTML_BYTES = 2 * 1024 * 1024;
 
 const ENCODER = new TextEncoder();
 
+export async function handleWorkerApi(
+  req: Request,
+  env: WorkerEnv,
+): Promise<Response | null> {
+  const url = new URL(req.url);
+  const { pathname } = url;
+
+  if (pathname === "/api/auth" || pathname.startsWith("/api/auth/")) {
+    try {
+      return await createAuth(env).handler(req);
+    } catch (err) {
+      return jsonError(`auth unavailable: ${msg(err)}`, 500);
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/render") {
+    return handleRender(env, req);
+  }
+
+  if (req.method === "POST" && pathname === "/api/generate") {
+    return handleGenerate(env, req);
+  }
+
+  if (req.method === "GET" && pathname === "/api/preview") {
+    return handlePreview(env, req);
+  }
+
+  if (req.method === "GET" && pathname === "/api/config") {
+    return Response.json(
+      {
+        aiGenEnabled: env.ENABLE_AI_GEN === "true",
+        modelLabel: env.OPENROUTER_MODEL?.trim() || DEFAULT_MODEL,
+      },
+      { headers: { "cache-control": "public, max-age=300" } },
+    );
+  }
+
+  if (req.method === "GET" && pathname.startsWith("/r/")) {
+    const key = pathname.slice("/r/".length);
+    return handleR2Get(env, key);
+  }
+
+  return null;
+}
+
 function isJsonRequest(req: Request): boolean {
   return req.headers.get("content-type")?.includes("application/json") ?? false;
 }
@@ -36,20 +85,26 @@ function utf8ByteLength(s: string): number {
   return ENCODER.encode(s).byteLength;
 }
 
-function fetchAsset(env: Env, path: string): Promise<Response> {
-  return env.ASSETS.fetch(new Request(`http://assets/${path}`));
+function fetchAsset(env: WorkerEnv, requestUrl: string, path: string): Promise<Response> {
+  const url = new URL(`/${path}`, requestUrl);
+  return env.ASSETS.fetch(new Request(url));
 }
 
-async function handlePreview(env: Env): Promise<Response> {
-  const res = await fetchAsset(env, "_bundled/preview.html");
-  if (!res.ok) return new Response("preview bundle missing — run build", { status: 500 });
+async function handlePreview(env: WorkerEnv, req: Request): Promise<Response> {
+  const res = await fetchAsset(env, req.url, "_bundled/preview.html");
+  if (!res.ok) {
+    return new Response("preview bundle missing - run build", { status: 500 });
+  }
   return new Response(res.body, { headers: PREVIEW_HEADERS });
 }
 
-async function loadBundledCompositionFiles(env: Env): Promise<Array<{ path: string; content: string }>> {
+async function loadBundledCompositionFiles(
+  env: WorkerEnv,
+  requestUrl: string,
+): Promise<Array<{ path: string; content: string }>> {
   return Promise.all(
     manifest.files.map(async (rel) => {
-      const res = await fetchAsset(env, `${manifest.dir}/${rel}`);
+      const res = await fetchAsset(env, requestUrl, `${manifest.dir}/${rel}`);
       if (!res.ok) throw new Error(`asset missing: ${rel} (${res.status})`);
       const buf = new Uint8Array(await res.arrayBuffer());
       return { path: rel, content: bufferToBase64(buf) };
@@ -79,14 +134,12 @@ interface RenderRequestBody {
   html?: string;
 }
 
-async function handleRender(env: Env, req: Request): Promise<Response> {
+async function handleRender(env: WorkerEnv, req: Request): Promise<Response> {
   const t0 = Date.now();
 
   let files: Array<{ path: string; content: string }>;
   let source: "bundled" | "html" = "bundled";
 
-  // Empty body falls through to the bundled composition for back-compat with
-  // the original "click Render" flow that doesn't post any body.
   let body: RenderRequestBody | null = null;
   if (isJsonRequest(req)) {
     try {
@@ -107,7 +160,7 @@ async function handleRender(env: Env, req: Request): Promise<Response> {
     source = "html";
   } else {
     try {
-      files = await loadBundledCompositionFiles(env);
+      files = await loadBundledCompositionFiles(env, req.url);
     } catch (err) {
       return jsonError(`failed to load composition: ${msg(err)}`, 500);
     }
@@ -153,10 +206,10 @@ interface GenerateRequestBody {
   durationSec?: number;
 }
 
-async function handleGenerate(env: Env, req: Request): Promise<Response> {
+async function handleGenerate(env: WorkerEnv, req: Request): Promise<Response> {
   if (env.ENABLE_AI_GEN !== "true") {
     return jsonError(
-      "AI generation is disabled on this deployment. Set ENABLE_AI_GEN=\"true\" in wrangler.jsonc vars to enable generation.",
+      'AI generation is disabled on this deployment. Set ENABLE_AI_GEN="true" in wrangler.jsonc vars to enable generation.',
       403,
     );
   }
@@ -197,6 +250,7 @@ async function handleGenerate(env: Env, req: Request): Promise<Response> {
       model: configuredModel,
       durationSec: typeof body.durationSec === "number" ? body.durationSec : undefined,
       referer,
+      appTitle: "Motion Frames",
     });
 
     return Response.json({
@@ -215,7 +269,7 @@ async function handleGenerate(env: Env, req: Request): Promise<Response> {
   }
 }
 
-async function handleR2Get(env: Env, key: string): Promise<Response> {
+async function handleR2Get(env: WorkerEnv, key: string): Promise<Response> {
   const obj = await env.RENDERS.get(key);
   if (!obj) return new Response("not found", { status: 404 });
   const headers = new Headers();
@@ -232,39 +286,3 @@ function jsonError(message: string, status: number): Response {
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
-
-export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
-    const url = new URL(req.url);
-    const { pathname } = url;
-
-    if (req.method === "POST" && pathname === "/api/render") {
-      return handleRender(env, req);
-    }
-
-    if (req.method === "POST" && pathname === "/api/generate") {
-      return handleGenerate(env, req);
-    }
-
-    if (req.method === "GET" && pathname === "/api/preview") {
-      return handlePreview(env);
-    }
-
-    if (req.method === "GET" && pathname === "/api/config") {
-      return Response.json(
-        {
-          aiGenEnabled: env.ENABLE_AI_GEN === "true",
-          modelLabel: env.OPENROUTER_MODEL?.trim() || DEFAULT_MODEL,
-        },
-        { headers: { "cache-control": "public, max-age=300" } },
-      );
-    }
-
-    if (req.method === "GET" && pathname.startsWith("/r/")) {
-      const key = pathname.slice("/r/".length);
-      return handleR2Get(env, key);
-    }
-
-    return env.ASSETS.fetch(req);
-  },
-};
