@@ -37,6 +37,7 @@ OPENROUTER_API_KEY="sk-or-v1-..."
 DATABASE_URL="postgresql://USER:PASSWORD@HOST.neon.tech/neondb?sslmode=require"
 BETTER_AUTH_SECRET="replace-with-a-long-random-secret"
 BETTER_AUTH_URL="http://localhost:5173"
+# BETTER_AUTH_API_KEY=""
 INITIAL_ADMIN_EMAILS="admin@example.com"
 ```
 
@@ -47,10 +48,18 @@ wrangler secret put OPENROUTER_API_KEY
 wrangler secret put DATABASE_URL
 wrangler secret put BETTER_AUTH_SECRET
 wrangler secret put BETTER_AUTH_URL
+# Only needed if Better Auth Dash gives your project an API key:
+wrangler secret put BETTER_AUTH_API_KEY
 ```
 
 `OPENROUTER_MODEL` can stay in `wrangler.jsonc` vars if you want a non-default
 model.
+
+Better Auth is mounted at `/api/auth`, so for a Worker deployed at
+`https://hyperframes-cloudflare-template.aaron-3f2.workers.dev`, set
+`BETTER_AUTH_URL` to that origin only. The Dash ownership verifier should check
+the app at that base URL; the plugin provides its infra endpoints beneath the
+Better Auth base path.
 
 ## Authentication And Tenancy
 

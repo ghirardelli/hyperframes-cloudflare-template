@@ -44,6 +44,7 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@better-auth/infra": "^0.3.4",
     "@cloudflare/containers": "^0.0.20",
     "@hyperframes/core": "^0.7.17",
     "@hyperframes/player": "^0.7.17",

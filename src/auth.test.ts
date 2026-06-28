@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const authMocks = vi.hoisted(() => ({
   betterAuth: vi.fn((config) => ({ config })),
+  dash: vi.fn((config) => ({ plugin: "dash", config })),
   admin: vi.fn((config) => ({ plugin: "admin", config })),
   drizzleAdapter: vi.fn(() => "drizzle-adapter"),
   tanstackStartCookies: vi.fn(() => ({ plugin: "tanstack-start-cookies" })),
@@ -13,6 +14,10 @@ vi.mock("better-auth", () => ({
 
 vi.mock("better-auth/adapters/drizzle", () => ({
   drizzleAdapter: authMocks.drizzleAdapter,
+}));
+
+vi.mock("@better-auth/infra", () => ({
+  dash: authMocks.dash,
 }));
 
 vi.mock("better-auth/plugins", () => ({
@@ -55,6 +60,25 @@ describe("Better Auth configuration", () => {
       expect.objectContaining({
         defaultRole: "user",
         adminRoles: ["admin"],
+      }),
+    );
+  });
+
+  it("registers the Better Auth Dash infrastructure plugin", () => {
+    createAuth({
+      DATABASE_URL: "postgresql://example",
+      BETTER_AUTH_SECRET: "secret",
+      BETTER_AUTH_URL: "https://motion-frames.test",
+      BETTER_AUTH_API_URL: "https://dash.better-auth.com",
+      BETTER_AUTH_KV_URL: "https://kv.better-auth.com",
+      BETTER_AUTH_API_KEY: "dash-key",
+    });
+
+    expect(authMocks.dash).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiUrl: "https://dash.better-auth.com",
+        kvUrl: "https://kv.better-auth.com",
+        apiKey: "dash-key",
       }),
     );
   });
