@@ -48,6 +48,7 @@ const PREVIEW_HEADERS = {
 
 const MAX_GENERATE_PROMPT_BYTES = 8 * 1024;
 const MAX_RENDER_HTML_BYTES = 2 * 1024 * 1024;
+const DASH_ORIGIN = "https://dash.better-auth.com";
 
 const ENCODER = new TextEncoder();
 
@@ -59,8 +60,14 @@ export async function handleWorkerApi(
   const { pathname } = url;
 
   if (pathname === "/api/auth" || pathname.startsWith("/api/auth/")) {
+    if (isDashAuthPath(pathname) && req.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: dashCorsHeaders(req) });
+    }
+
     try {
-      return await createAuth(env).handler(req);
+      const response = await createAuth(env).handler(req);
+      if (isDashAuthPath(pathname)) addDashCorsHeaders(req, response.headers);
+      return response;
     } catch (err) {
       return jsonError(`auth unavailable: ${msg(err)}`, 500);
     }
@@ -863,6 +870,31 @@ async function createOrganization(env: WorkerEnv, name: string) {
 
 function jsonError(message: string, status: number): Response {
   return Response.json({ error: message }, { status });
+}
+
+function isDashAuthPath(pathname: string) {
+  return pathname === "/api/auth/dash" || pathname.startsWith("/api/auth/dash/");
+}
+
+function dashCorsHeaders(req: Request) {
+  const headers = new Headers();
+  addDashCorsHeaders(req, headers);
+  return headers;
+}
+
+function addDashCorsHeaders(req: Request, headers: Headers) {
+  if (req.headers.get("origin") !== DASH_ORIGIN) return;
+  headers.set("access-control-allow-origin", DASH_ORIGIN);
+  headers.set("access-control-allow-methods", "GET, POST, OPTIONS");
+  headers.set("access-control-allow-headers", "authorization, content-type");
+  headers.set("access-control-max-age", "86400");
+  headers.set("vary", appendVary(headers.get("vary"), "Origin"));
+}
+
+function appendVary(existing: string | null, value: string) {
+  if (!existing) return value;
+  const parts = existing.split(",").map((part) => part.trim().toLowerCase());
+  return parts.includes(value.toLowerCase()) ? existing : `${existing}, ${value}`;
 }
 
 async function readJson<T>(req: Request): Promise<T> {

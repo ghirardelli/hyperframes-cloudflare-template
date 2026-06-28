@@ -34,6 +34,28 @@ describe("handleWorkerApi", () => {
     });
   });
 
+  it("answers Better Auth Dash CORS preflight requests", async () => {
+    const response = await handleWorkerApi(
+      new Request("https://motion-frames.test/api/auth/dash/validate", {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://dash.better-auth.com",
+          "access-control-request-method": "GET",
+          "access-control-request-headers": "authorization",
+        },
+      }),
+      { ENABLE_AI_GEN: "true" } as WorkerEnv,
+    );
+
+    expect(response?.status).toBe(204);
+    expect(response?.headers.get("access-control-allow-origin")).toBe(
+      "https://dash.better-auth.com",
+    );
+    expect(response?.headers.get("access-control-allow-headers")).toContain(
+      "authorization",
+    );
+  });
+
   it("lets TanStack Start handle non-worker routes", async () => {
     const response = await handleWorkerApi(
       new Request("https://motion-frames.test/"),

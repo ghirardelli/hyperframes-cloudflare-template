@@ -82,4 +82,20 @@ describe("Better Auth configuration", () => {
       }),
     );
   });
+
+  it("trusts Better Auth Dash and configured origins", () => {
+    createAuth({
+      DATABASE_URL: "postgresql://example",
+      BETTER_AUTH_SECRET: "secret",
+      BETTER_AUTH_URL: "https://motion-frames.test",
+      BETTER_AUTH_TRUSTED_ORIGINS: "https://app.example.com, https://admin.example.com",
+    });
+
+    const config = authMocks.betterAuth.mock.calls.at(-1)?.[0];
+    expect(config.trustedOrigins).toEqual([
+      "https://dash.better-auth.com",
+      "https://app.example.com",
+      "https://admin.example.com",
+    ]);
+  });
 });

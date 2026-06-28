@@ -16,6 +16,10 @@ BETTER_AUTH_URL="http://localhost:5173"
 # BETTER_AUTH_KV_URL="https://kv.better-auth.com"
 # BETTER_AUTH_API_KEY=""
 
+# Optional. Comma-separated additional origins allowed by Better Auth.
+# The hosted Better Auth Dash origin is trusted by the app automatically.
+# BETTER_AUTH_TRUSTED_ORIGINS="https://app.example.com"
+
 # Optional bootstrap: comma-separated emails that should be treated as admins
 # even before a Motion Frames membership exists. Create or seed the matching
 # Better Auth user first, then remove this after assigning a real admin user.
