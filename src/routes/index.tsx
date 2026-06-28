@@ -4,10 +4,13 @@ import {
   CheckCircle2,
   Download,
   Film,
+  FolderKanban,
+  Grid2X2,
   Loader2,
   Play,
   RotateCcw,
   Sparkles,
+  UserRound,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +38,7 @@ interface ConfigResponse {
 
 interface GenerateResponse {
   html?: string;
+  project?: { id: string; title: string };
   model?: string;
   attempts?: number;
   durationMs?: number;
@@ -50,6 +54,19 @@ interface RenderResponse {
   error?: string;
 }
 
+interface MeResponse {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role?: string | null;
+  };
+  organization: {
+    id: string;
+    name: string;
+  };
+}
+
 const DEFAULT_PROMPT =
   "A 9 second kinetic product teaser for Motion Frames: crisp editorial typography, a Cloudflare orange accent, a teal render timeline, and one clean camera move.";
 
@@ -59,6 +76,9 @@ function MotionFramesHome() {
   const [generatedHtml, setGeneratedHtml] = useState("");
   const [aiEnabled, setAiEnabled] = useState(false);
   const [modelLabel, setModelLabel] = useState("");
+  const [me, setMe] = useState<MeResponse | null>(null);
+  const [activeProjectId, setActiveProjectId] = useState("");
+  const [activeProjectTitle, setActiveProjectTitle] = useState("");
   const [isConfigReady, setIsConfigReady] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
@@ -71,6 +91,25 @@ function MotionFramesHome() {
   const activeSource = generatedHtml ? "Generated HTML" : "Bundled intro";
   const canGenerate = aiEnabled && prompt.trim().length > 0;
   const canRender = !isRendering && !isGenerating;
+  const isAdmin = me?.user.role?.split(",").map((role) => role.trim()).includes("admin") ?? false;
+
+  useEffect(() => {
+    fetch("/api/me")
+      .then((res) => {
+        if (res.status === 401) {
+          window.location.assign("/login");
+          return null;
+        }
+        if (!res.ok) throw new Error("Unable to load profile");
+        return res.json() as Promise<MeResponse>;
+      })
+      .then((data) => {
+        if (data) setMe(data);
+      })
+      .catch(() => {
+        window.location.assign("/login");
+      });
+  }, []);
 
   useEffect(() => {
     fetch("/api/config")
@@ -121,7 +160,10 @@ function MotionFramesHome() {
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: prompt.trim() }),
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          projectId: activeProjectId || undefined,
+        }),
       });
       const data = (await response.json()) as GenerateResponse;
       if (!response.ok || !data.html) {
@@ -129,6 +171,10 @@ function MotionFramesHome() {
       }
 
       setGeneratedHtml(data.html);
+      if (data.project?.id) {
+        setActiveProjectId(data.project.id);
+        setActiveProjectTitle(data.project.title);
+      }
       setStatus({
         tone: data.lintOk ? "success" : "idle",
         message: `Generated with ${data.model ?? "selected model"} in ${data.attempts ?? 1} attempt(s).`,
@@ -149,8 +195,14 @@ function MotionFramesHome() {
     try {
       const response = await fetch("/api/render", {
         method: "POST",
-        headers: generatedHtml ? { "content-type": "application/json" } : undefined,
-        body: generatedHtml ? JSON.stringify({ html: generatedHtml }) : undefined,
+        headers: generatedHtml || activeProjectId ? { "content-type": "application/json" } : undefined,
+        body:
+          generatedHtml || activeProjectId
+            ? JSON.stringify({
+                html: generatedHtml || undefined,
+                projectId: activeProjectId || undefined,
+              })
+            : undefined,
       });
       const data = (await response.json()) as RenderResponse;
       if (!response.ok || !data.url) {
@@ -172,7 +224,20 @@ function MotionFramesHome() {
   function resetComposition() {
     setGeneratedHtml("");
     setRenderUrl("");
+    setActiveProjectId("");
+    setActiveProjectTitle("");
     setStatus({ tone: "idle", message: "Bundled composition loaded." });
+  }
+
+  if (!me) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-stone-50 px-6 text-stone-950">
+        <div className="text-center">
+          <Film className="mx-auto h-8 w-8 text-[#0066cc]" aria-hidden="true" />
+          <p className="mt-4 text-lg font-medium">Opening Motion Frames...</p>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -181,17 +246,44 @@ function MotionFramesHome() {
         <div className="flex min-h-[calc(100vh-2rem)] flex-col gap-4">
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 pb-4">
             <div>
-              <div className="flex items-center gap-2 text-sm font-medium text-orange-700">
+              <div className="flex items-center gap-2 text-sm font-medium text-[#0066cc]">
                 <Film className="h-4 w-4" aria-hidden="true" />
-                Cloudflare render studio
+                {me?.organization.name ?? "Motion Frames"}
               </div>
               <h1 className="mt-2 text-4xl font-semibold text-stone-950 sm:text-5xl">
                 Motion Frames
               </h1>
             </div>
-            <Badge variant="secondary" className="h-8 rounded-md border-stone-300 bg-white px-3">
-              {activeSource}
-            </Badge>
+            <nav className="flex flex-wrap items-center gap-2">
+              <Button asChild variant="ghost" size="sm">
+                <a href="/playground">
+                  <Grid2X2 className="h-4 w-4" aria-hidden="true" />
+                  Playground
+                </a>
+              </Button>
+              {activeProjectId ? (
+                <Button asChild variant="ghost" size="sm">
+                  <a href={`/projects/${activeProjectId}/studio`}>
+                    <FolderKanban className="h-4 w-4" aria-hidden="true" />
+                    Studio
+                  </a>
+                </Button>
+              ) : null}
+              {isAdmin ? (
+                <Button asChild variant="ghost" size="sm">
+                  <a href="/admin">Admin</a>
+                </Button>
+              ) : null}
+              <Button asChild variant="secondary" size="sm">
+                <a href="/profile">
+                  <UserRound className="h-4 w-4" aria-hidden="true" />
+                  Profile
+                </a>
+              </Button>
+              <Badge variant="secondary" className="h-8 rounded-full border-stone-300 bg-white px-3">
+                {activeProjectTitle || activeSource}
+              </Badge>
+            </nav>
           </header>
 
           <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-lg border border-stone-200 bg-neutral-950 p-3 shadow-sm">

@@ -13,6 +13,8 @@
   // run the render container on your account from generated HTML.
   "vars": {
     "ENABLE_AI_GEN": "true"
+    // Optional first-admin bootstrap. Remove after assigning real admin users:
+    // "INITIAL_ADMIN_EMAILS": "admin@example.com"
     // Optional model override:
     // "OPENROUTER_MODEL": "google/gemini-3-flash-preview"
   },

@@ -37,6 +37,7 @@ OPENROUTER_API_KEY="sk-or-v1-..."
 DATABASE_URL="postgresql://USER:PASSWORD@HOST.neon.tech/neondb?sslmode=require"
 BETTER_AUTH_SECRET="replace-with-a-long-random-secret"
 BETTER_AUTH_URL="http://localhost:5173"
+INITIAL_ADMIN_EMAILS="admin@example.com"
 ```
 
 For production, store secrets with Cloudflare:
@@ -50,6 +51,40 @@ wrangler secret put BETTER_AUTH_URL
 
 `OPENROUTER_MODEL` can stay in `wrangler.jsonc` vars if you want a non-default
 model.
+
+## Authentication And Tenancy
+
+Motion Frames is invite-only. Public email/password signup is disabled, and all
+creator, render, project, profile, admin, and catalog APIs require a Better Auth
+session. Each user belongs to one organization through
+`organization_memberships`; project, render, and published catalog data is always
+filtered by that organization.
+
+First admin bootstrap uses `INITIAL_ADMIN_EMAILS`, a comma-separated env var.
+Create or seed a matching Better Auth user, sign in as that user, then open
+`/admin` to create organizations and invited users. Bootstrap users without a
+real organization can only administer setup; workspace generation/rendering
+requires assigning the admin user to a real organization. Remove
+`INITIAL_ADMIN_EMAILS` after a permanent admin membership exists.
+
+Admins can create users with a name, email, password, role, and organization,
+including creating a new organization inline. They can also lock or unlock
+accounts. Regular users can update their profile name and change their password,
+but cannot change organization, role, or lock state.
+
+## Studio And Catalog
+
+`/projects/<id>/studio` is an authenticated, organization-scoped Motion Frames
+Studio shell. It persists project HTML edits, previews with
+`<hyperframes-player>`, renders through the existing Worker/Container/R2
+pipeline, and publishes to the organization catalog. `@hyperframes/studio` is
+installed for the latest package surface, but v1 uses the fallback shell because
+the package currently exposes lower-level editor/player primitives rather than a
+single drop-in hosted Studio app.
+
+`/playground` shows seeded examples plus organization-published projects with
+open and remix actions. Published/remixed data never crosses organization
+boundaries.
 
 ## Database
 
@@ -69,6 +104,15 @@ The initial migration creates Better Auth tables:
 - `sessions`
 - `accounts`
 - `verifications`
+
+The multi-tenant migration adds admin user fields plus:
+
+- `organizations`
+- `organization_memberships`
+- `projects`
+- `project_versions`
+- `renders`
+- `published_projects`
 
 ## Hyperdrive
 
@@ -102,9 +146,10 @@ TanStack/Vite virtual modules generated into `dist/server`.
 src/
   auth.ts                    # Better Auth factory
   db/                        # Drizzle schema and Neon HTTP client
+  lib/auth-context.ts         # Shared session, role, lock, and tenant checks
   routes/                    # TanStack Start routes
   server.ts                  # Cloudflare Worker entrypoint
-  worker/render-api.ts       # /api/render, /api/generate, /api/config, /r/*
+  worker/render-api.ts       # auth, project, publish, render, generate APIs
   container.ts               # RenderContainer Durable Object
 public/
   compositions/              # bundled HyperFrames composition assets
@@ -118,11 +163,13 @@ drizzle/
 
 ```txt
 TanStack app
+  -> login gate via Better Auth session
   -> /api/preview reads bundled HTML from ASSETS
-  -> /api/generate calls OpenRouter with the server-side key
-  -> /api/render sends bundled or generated HTML to RenderContainer
+  -> /api/generate calls OpenRouter with the server-side key and stores a project
+  -> /projects/<id>/studio edits, previews, renders, and publishes the project
+  -> /api/render sends project or generated HTML to RenderContainer
   -> RenderContainer streams MP4 bytes back
-  -> Worker writes the MP4 to R2 and returns /r/<key>
+  -> Worker writes organization-prefixed MP4s to R2 and returns /r/<key>
 ```
 
 ## References

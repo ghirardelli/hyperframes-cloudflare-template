@@ -1,18 +1,37 @@
 import { getContainer } from "@cloudflare/containers";
+import { and, desc, eq, isNull } from "drizzle-orm";
 
 import { createAuth } from "../auth";
 import manifest from "../composition-manifest.json";
 import { RenderContainer } from "../container";
+import { createDb } from "../db";
+import {
+  organizationMemberships,
+  organizations,
+  projectVersions,
+  projects,
+  publishedProjects,
+  renders,
+  sessions,
+  users,
+} from "../db/schema";
+import {
+  AuthRequiredError,
+  ForbiddenError,
+  assertAdmin,
+  requireAuthContext,
+  requireProjectAccess,
+  requirePublishedProjectAccess,
+  type AppAuthContext,
+  type TenantAuthEnv,
+} from "../lib/auth-context";
 import { DEFAULT_MODEL, generateComposition, GenerateError } from "../lib/generate";
 
-export interface WorkerEnv {
+export interface WorkerEnv extends TenantAuthEnv {
   ASSETS: Fetcher;
   RENDER_CONTAINER: DurableObjectNamespace<RenderContainer>;
   RENDERS: R2Bucket;
   HYPERDRIVE?: Hyperdrive;
-  DATABASE_URL?: string;
-  BETTER_AUTH_SECRET?: string;
-  BETTER_AUTH_URL?: string;
   /** "true" enables AI generation. Configure in wrangler.jsonc vars. */
   ENABLE_AI_GEN?: string;
   /** Server-side OpenRouter API key. Set with `wrangler secret put OPENROUTER_API_KEY`. */
@@ -47,18 +66,6 @@ export async function handleWorkerApi(
     }
   }
 
-  if (req.method === "POST" && pathname === "/api/render") {
-    return handleRender(env, req);
-  }
-
-  if (req.method === "POST" && pathname === "/api/generate") {
-    return handleGenerate(env, req);
-  }
-
-  if (req.method === "GET" && pathname === "/api/preview") {
-    return handlePreview(env, req);
-  }
-
   if (req.method === "GET" && pathname === "/api/config") {
     return Response.json(
       {
@@ -69,9 +76,36 @@ export async function handleWorkerApi(
     );
   }
 
+  const appApiResponse = await handleAppApi(env, req, pathname);
+  if (appApiResponse) return appApiResponse;
+
+  if (req.method === "POST" && pathname === "/api/render") {
+    const auth = await protectedContext(req, env);
+    if (auth instanceof Response) return auth;
+    const tenant = requireTenantOrganization(auth);
+    if (tenant) return tenant;
+    return handleRender(env, req, auth);
+  }
+
+  if (req.method === "POST" && pathname === "/api/generate") {
+    const auth = await protectedContext(req, env);
+    if (auth instanceof Response) return auth;
+    const tenant = requireTenantOrganization(auth);
+    if (tenant) return tenant;
+    return handleGenerate(env, req, auth);
+  }
+
+  if (req.method === "GET" && pathname === "/api/preview") {
+    const auth = await protectedContext(req, env);
+    if (auth instanceof Response) return auth;
+    return handlePreview(env, req);
+  }
+
   if (req.method === "GET" && pathname.startsWith("/r/")) {
+    const auth = await protectedContext(req, env);
+    if (auth instanceof Response) return auth;
     const key = pathname.slice("/r/".length);
-    return handleR2Get(env, key);
+    return handleR2Get(env, key, auth);
   }
 
   return null;
@@ -132,9 +166,14 @@ function htmlToFiles(html: string): Array<{ path: string; content: string }> {
 
 interface RenderRequestBody {
   html?: string;
+  projectId?: string;
 }
 
-async function handleRender(env: WorkerEnv, req: Request): Promise<Response> {
+async function handleRender(
+  env: WorkerEnv,
+  req: Request,
+  context: AppAuthContext,
+): Promise<Response> {
   const t0 = Date.now();
 
   let files: Array<{ path: string; content: string }>;
@@ -157,6 +196,11 @@ async function handleRender(env: WorkerEnv, req: Request): Promise<Response> {
       return jsonError(`html exceeds ${MAX_RENDER_HTML_BYTES} bytes`, 413);
     }
     files = htmlToFiles(body.html);
+    source = "html";
+  } else if (body?.projectId) {
+    const project = await requireProjectAccess(context, body.projectId, env);
+    if (!project.currentHtml) return jsonError("project has no composition HTML", 400);
+    files = htmlToFiles(project.currentHtml);
     source = "html";
   } else {
     try {
@@ -185,9 +229,19 @@ async function handleRender(env: WorkerEnv, req: Request): Promise<Response> {
     return jsonError(`render failed (${containerRes.status}): ${errBody}`, 502);
   }
 
-  const key = `renders/${Date.now()}-${crypto.randomUUID()}.mp4`;
+  const key = `renders/${context.organization.id}/${Date.now()}-${crypto.randomUUID()}.mp4`;
   await env.RENDERS.put(key, containerRes.body, {
     httpMetadata: { contentType: "video/mp4" },
+  });
+
+  await createDb(env).insert(renders).values({
+    id: crypto.randomUUID(),
+    projectId: body?.projectId ?? null,
+    organizationId: context.organization.id,
+    userId: context.user.id,
+    r2Key: key,
+    sourceType: source,
+    durationMs: Date.now() - t0,
   });
 
   const url = new URL(req.url);
@@ -204,9 +258,15 @@ async function handleRender(env: WorkerEnv, req: Request): Promise<Response> {
 interface GenerateRequestBody {
   prompt?: string;
   durationSec?: number;
+  projectId?: string;
+  title?: string;
 }
 
-async function handleGenerate(env: WorkerEnv, req: Request): Promise<Response> {
+async function handleGenerate(
+  env: WorkerEnv,
+  req: Request,
+  context: AppAuthContext,
+): Promise<Response> {
   if (env.ENABLE_AI_GEN !== "true") {
     return jsonError(
       'AI generation is disabled on this deployment. Set ENABLE_AI_GEN="true" in wrangler.jsonc vars to enable generation.',
@@ -248,13 +308,16 @@ async function handleGenerate(env: WorkerEnv, req: Request): Promise<Response> {
       apiKey: openRouterKey,
       prompt: body.prompt,
       model: configuredModel,
-      durationSec: typeof body.durationSec === "number" ? body.durationSec : undefined,
+      durationSec: normalizedDuration(body.durationSec),
       referer,
       appTitle: "Motion Frames",
     });
 
+    const project = await upsertGeneratedProject(env, context, body, result.html);
+
     return Response.json({
       html: result.html,
+      project,
       model: result.model,
       attempts: result.attempts,
       durationMs: result.durationMs,
@@ -269,7 +332,21 @@ async function handleGenerate(env: WorkerEnv, req: Request): Promise<Response> {
   }
 }
 
-async function handleR2Get(env: WorkerEnv, key: string): Promise<Response> {
+async function handleR2Get(
+  env: WorkerEnv,
+  key: string,
+  context: AppAuthContext,
+): Promise<Response> {
+  const renderRows = await createDb(env)
+    .select({ organizationId: renders.organizationId })
+    .from(renders)
+    .where(eq(renders.r2Key, key))
+    .limit(1);
+
+  if (!renderRows[0] || renderRows[0].organizationId !== context.organization.id) {
+    return new Response("not found", { status: 404 });
+  }
+
   const obj = await env.RENDERS.get(key);
   if (!obj) return new Response("not found", { status: 404 });
   const headers = new Headers();
@@ -279,10 +356,578 @@ async function handleR2Get(env: WorkerEnv, key: string): Promise<Response> {
   return new Response(obj.body, { headers });
 }
 
+async function handleAppApi(
+  env: WorkerEnv,
+  req: Request,
+  pathname: string,
+): Promise<Response | null> {
+  if (!pathname.startsWith("/api/")) return null;
+  if (pathname === "/api/config" || pathname === "/api/auth" || pathname.startsWith("/api/auth/")) {
+    return null;
+  }
+  if (pathname === "/api/render" || pathname === "/api/generate" || pathname === "/api/preview") {
+    return null;
+  }
+
+  const auth = await protectedContext(req, env);
+  if (auth instanceof Response) return auth;
+
+  try {
+    if (pathname === "/api/me" && req.method === "GET") {
+      return Response.json(auth);
+    }
+
+    if (pathname === "/api/profile" && req.method === "GET") {
+      return Response.json(auth);
+    }
+    if (pathname === "/api/profile" && req.method === "PATCH") {
+      return await handleProfileUpdate(env, req, auth);
+    }
+    if (pathname === "/api/profile/password" && req.method === "POST") {
+      return await handlePasswordChange(env, req);
+    }
+
+    if (pathname === "/api/admin/organizations") {
+      assertAdmin(auth);
+      if (req.method === "GET") return await handleListOrganizations(env);
+      if (req.method === "POST") return await handleCreateOrganization(env, req);
+    }
+
+    if (pathname === "/api/admin/users") {
+      assertAdmin(auth);
+      if (req.method === "GET") return await handleListUsers(env);
+      if (req.method === "POST") return await handleCreateUser(env, req);
+    }
+
+    const adminUserMatch = pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
+    if (adminUserMatch && req.method === "PATCH") {
+      assertAdmin(auth);
+      return await handleUpdateUserLock(env, req, adminUserMatch[1]);
+    }
+
+    if (pathname === "/api/projects") {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      if (req.method === "GET") return await handleListProjects(env, auth);
+      if (req.method === "POST") return await handleCreateProject(env, req, auth);
+    }
+
+    const projectMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);
+    if (projectMatch) {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      if (req.method === "GET") return await handleGetProject(env, auth, projectMatch[1]);
+      if (req.method === "PATCH") return await handleUpdateProject(env, req, auth, projectMatch[1]);
+    }
+
+    const projectPublishMatch = pathname.match(/^\/api\/projects\/([^/]+)\/publish$/);
+    if (projectPublishMatch && req.method === "POST") {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      return await handlePublishProject(env, req, auth, projectPublishMatch[1]);
+    }
+
+    if (pathname === "/api/catalog" && req.method === "GET") {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      return await handleCatalog(env, auth);
+    }
+
+    const publishedMatch = pathname.match(/^\/api\/published\/([^/]+)$/);
+    if (publishedMatch && req.method === "DELETE") {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      return await handleUnpublish(env, auth, publishedMatch[1]);
+    }
+
+    const remixMatch = pathname.match(/^\/api\/published\/([^/]+)\/remix$/);
+    if (remixMatch && req.method === "POST") {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      return await handleRemix(env, auth, remixMatch[1]);
+    }
+  } catch (err) {
+    if (err instanceof AuthRequiredError || err instanceof ForbiddenError) {
+      return jsonError(err.message, err.status);
+    }
+    return jsonError(msg(err), 500);
+  }
+
+  return null;
+}
+
+async function handleProfileUpdate(
+  env: WorkerEnv,
+  req: Request,
+  context: AppAuthContext,
+): Promise<Response> {
+  const body = await readJson<{ name?: string }>(req);
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (name.length < 1) return jsonError("name is required", 400);
+
+  const updated = await createDb(env)
+    .update(users)
+    .set({ name, updatedAt: new Date() })
+    .where(eq(users.id, context.user.id))
+    .returning({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      role: users.role,
+    });
+
+  return Response.json({ user: updated[0], organization: context.organization });
+}
+
+async function handlePasswordChange(env: WorkerEnv, req: Request): Promise<Response> {
+  const body = await readJson<{ currentPassword?: string; newPassword?: string }>(req);
+  if (!body.currentPassword || !body.newPassword) {
+    return jsonError("currentPassword and newPassword are required", 400);
+  }
+  await createAuth(env).api.changePassword({
+    headers: req.headers,
+    body: {
+      currentPassword: body.currentPassword,
+      newPassword: body.newPassword,
+      revokeOtherSessions: true,
+    },
+  });
+  return Response.json({ ok: true });
+}
+
+async function handleListOrganizations(env: WorkerEnv): Promise<Response> {
+  const rows = await createDb(env)
+    .select()
+    .from(organizations)
+    .orderBy(organizations.name);
+  return Response.json({ organizations: rows });
+}
+
+async function handleCreateOrganization(env: WorkerEnv, req: Request): Promise<Response> {
+  const body = await readJson<{ name?: string }>(req);
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!name) return jsonError("organization name is required", 400);
+  const org = await createOrganization(env, name);
+  return Response.json({ organization: org }, { status: 201 });
+}
+
+async function handleListUsers(env: WorkerEnv): Promise<Response> {
+  const rows = await createDb(env)
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      role: users.role,
+      banned: users.banned,
+      organizationId: organizations.id,
+      organizationName: organizations.name,
+    })
+    .from(users)
+    .leftJoin(organizationMemberships, eq(users.id, organizationMemberships.userId))
+    .leftJoin(organizations, eq(organizationMemberships.organizationId, organizations.id))
+    .orderBy(users.email);
+  return Response.json({ users: rows });
+}
+
+async function handleCreateUser(env: WorkerEnv, req: Request): Promise<Response> {
+  const body = await readJson<{
+    name?: string;
+    email?: string;
+    password?: string;
+    role?: string;
+    organizationId?: string;
+    organizationName?: string;
+  }>(req);
+
+  const name = body.name?.trim();
+  const email = body.email?.trim().toLowerCase();
+  const password = body.password;
+  if (!name || !email || !password) return jsonError("name, email, and password are required", 400);
+
+  const organization = body.organizationId
+    ? await getOrganization(env, body.organizationId)
+    : await createOrganization(env, body.organizationName?.trim() || "");
+  if (!organization) return jsonError("organization is required", 400);
+
+  const created = (await createAuth(env).api.createUser({
+    body: {
+      email,
+      password,
+      name,
+      role: body.role === "admin" ? "admin" : "user",
+    },
+  } as never)) as unknown as { user: { id: string } };
+
+  await createDb(env).insert(organizationMemberships).values({
+    id: crypto.randomUUID(),
+    organizationId: organization.id,
+    userId: created.user.id,
+    organizationRole: "member",
+  });
+
+  return Response.json({ user: created.user, organization }, { status: 201 });
+}
+
+async function handleUpdateUserLock(
+  env: WorkerEnv,
+  req: Request,
+  userId: string,
+): Promise<Response> {
+  const body = await readJson<{ locked?: boolean }>(req);
+  const locked = body.locked === true;
+  const db = createDb(env);
+  const updated = await db
+    .update(users)
+    .set({
+      banned: locked,
+      banReason: locked ? "Locked by administrator" : null,
+      banExpires: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId))
+    .returning({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      role: users.role,
+      banned: users.banned,
+    });
+  if (!updated[0]) return jsonError("user not found", 404);
+  if (locked) {
+    await db.delete(sessions).where(eq(sessions.userId, userId));
+  }
+  return Response.json({ user: updated[0] });
+}
+
+async function handleListProjects(
+  env: WorkerEnv,
+  context: AppAuthContext,
+): Promise<Response> {
+  const rows = await createDb(env)
+    .select()
+    .from(projects)
+    .where(eq(projects.organizationId, context.organization.id))
+    .orderBy(desc(projects.updatedAt));
+  return Response.json({ projects: rows });
+}
+
+async function handleCreateProject(
+  env: WorkerEnv,
+  req: Request,
+  context: AppAuthContext,
+): Promise<Response> {
+  const body = await readJson<{
+    title?: string;
+    prompt?: string;
+    html?: string;
+    durationSec?: number;
+  }>(req);
+  const project = await createProject(env, context, {
+    title: body.title || titleFromPrompt(body.prompt || "Untitled project"),
+    prompt: body.prompt,
+    html: body.html,
+    durationSec: normalizedDuration(body.durationSec) ?? 6,
+  });
+  return Response.json({ project }, { status: 201 });
+}
+
+async function handleGetProject(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  projectId: string,
+): Promise<Response> {
+  const project = await requireProjectAccess(context, projectId, env);
+  return Response.json({ project });
+}
+
+async function handleUpdateProject(
+  env: WorkerEnv,
+  req: Request,
+  context: AppAuthContext,
+  projectId: string,
+): Promise<Response> {
+  await requireProjectAccess(context, projectId, env);
+  const body = await readJson<{
+    title?: string;
+    prompt?: string;
+    html?: string;
+    durationSec?: number;
+  }>(req);
+  const update: Partial<typeof projects.$inferInsert> = {
+    updatedAt: new Date(),
+  };
+  if (typeof body.title === "string") update.title = body.title.trim() || "Untitled project";
+  if (typeof body.prompt === "string") update.prompt = body.prompt;
+  if (typeof body.html === "string") update.currentHtml = body.html;
+  if (typeof body.durationSec === "number") update.durationSec = normalizedDuration(body.durationSec) ?? 6;
+
+  const rows = await createDb(env)
+    .update(projects)
+    .set(update)
+    .where(eq(projects.id, projectId))
+    .returning();
+
+  if (typeof body.html === "string") {
+    await createDb(env).insert(projectVersions).values({
+      id: crypto.randomUUID(),
+      projectId,
+      organizationId: context.organization.id,
+      createdById: context.user.id,
+      sourceKind: "studio-edit",
+      prompt: body.prompt,
+      html: body.html,
+    });
+  }
+
+  return Response.json({ project: rows[0] });
+}
+
+async function handlePublishProject(
+  env: WorkerEnv,
+  req: Request,
+  context: AppAuthContext,
+  projectId: string,
+): Promise<Response> {
+  const project = await requireProjectAccess(context, projectId, env);
+  const body = await readJson<{
+    title?: string;
+    description?: string;
+    posterKey?: string;
+  }>(req);
+  if (!project.currentHtml) return jsonError("project has no composition HTML", 400);
+  const row = await createDb(env)
+    .insert(publishedProjects)
+    .values({
+      id: crypto.randomUUID(),
+      organizationId: context.organization.id,
+      projectId,
+      title: body.title?.trim() || project.title,
+      description: body.description?.trim() || null,
+      posterKey: body.posterKey || null,
+      durationSec: project.durationSec,
+      sourceHtml: project.currentHtml,
+      publishedById: context.user.id,
+    })
+    .returning();
+  return Response.json({ publishedProject: row[0] }, { status: 201 });
+}
+
+async function handleCatalog(env: WorkerEnv, context: AppAuthContext): Promise<Response> {
+  const published = await createDb(env)
+    .select()
+    .from(publishedProjects)
+    .where(
+      and(
+        eq(publishedProjects.organizationId, context.organization.id),
+        isNull(publishedProjects.unpublishedAt),
+      ),
+    )
+    .orderBy(desc(publishedProjects.publishedAt));
+  const examples = seededExamples();
+  return Response.json({
+    catalogCount: examples.length + published.length,
+    examples,
+    publishedProjects: published,
+  });
+}
+
+async function handleRemix(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  publishedProjectId: string,
+): Promise<Response> {
+  const published = await requirePublishedProjectAccess(context, publishedProjectId, env);
+  if (published.unpublishedAt) throw new ForbiddenError("published project access denied");
+  const project = await createProject(env, context, {
+    title: `${published.title} Remix`,
+    html: published.sourceHtml,
+    durationSec: published.durationSec,
+  });
+  return Response.json({ project }, { status: 201 });
+}
+
+async function handleUnpublish(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  publishedProjectId: string,
+): Promise<Response> {
+  await requirePublishedProjectAccess(context, publishedProjectId, env);
+  const rows = await createDb(env)
+    .update(publishedProjects)
+    .set({ unpublishedAt: new Date() })
+    .where(eq(publishedProjects.id, publishedProjectId))
+    .returning();
+  return Response.json({ publishedProject: rows[0] });
+}
+
+async function upsertGeneratedProject(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  body: GenerateRequestBody,
+  html: string,
+) {
+  const durationSec = normalizedDuration(body.durationSec) ?? 6;
+  if (body.projectId) {
+    await requireProjectAccess(context, body.projectId, env);
+    const rows = await createDb(env)
+      .update(projects)
+      .set({
+        prompt: body.prompt,
+        currentHtml: html,
+        durationSec,
+        updatedAt: new Date(),
+      })
+      .where(eq(projects.id, body.projectId))
+      .returning();
+    await createDb(env).insert(projectVersions).values({
+      id: crypto.randomUUID(),
+      projectId: body.projectId,
+      organizationId: context.organization.id,
+      createdById: context.user.id,
+      sourceKind: "generated-html",
+      prompt: body.prompt,
+      html,
+    });
+    return rows[0];
+  }
+  return createProject(env, context, {
+    title: body.title || titleFromPrompt(body.prompt || "Generated project"),
+    prompt: body.prompt,
+    html,
+    durationSec,
+  });
+}
+
+async function createProject(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  input: {
+    title: string;
+    prompt?: string;
+    html?: string;
+    durationSec: number;
+  },
+) {
+  const db = createDb(env);
+  const projectId = crypto.randomUUID();
+  const rows = await db
+    .insert(projects)
+    .values({
+      id: projectId,
+      organizationId: context.organization.id,
+      ownerId: context.user.id,
+      title: input.title.trim() || "Untitled project",
+      prompt: input.prompt || null,
+      currentHtml: input.html || null,
+      durationSec: input.durationSec,
+    })
+    .returning();
+
+  if (input.html) {
+    await db.insert(projectVersions).values({
+      id: crypto.randomUUID(),
+      projectId,
+      organizationId: context.organization.id,
+      createdById: context.user.id,
+      sourceKind: "generated-html",
+      prompt: input.prompt || null,
+      html: input.html,
+    });
+  }
+
+  return rows[0];
+}
+
+async function getOrganization(env: WorkerEnv, organizationId: string) {
+  const rows = await createDb(env)
+    .select()
+    .from(organizations)
+    .where(eq(organizations.id, organizationId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+async function createOrganization(env: WorkerEnv, name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  const rows = await createDb(env)
+    .insert(organizations)
+    .values({
+      id: crypto.randomUUID(),
+      name: trimmed,
+      slug: `${slugify(trimmed)}-${crypto.randomUUID().slice(0, 8)}`,
+    })
+    .returning();
+  return rows[0];
+}
+
 function jsonError(message: string, status: number): Response {
   return Response.json({ error: message }, { status });
 }
 
+async function readJson<T>(req: Request): Promise<T> {
+  try {
+    return (await req.json()) as T;
+  } catch {
+    throw new Error("invalid JSON body");
+  }
+}
+
+async function protectedContext(
+  req: Request,
+  env: WorkerEnv,
+): Promise<AppAuthContext | Response> {
+  try {
+    return await requireAuthContext(req, env);
+  } catch (err) {
+    if (err instanceof AuthRequiredError || err instanceof ForbiddenError) {
+      return jsonError(err.message, err.status);
+    }
+    return jsonError(`auth unavailable: ${msg(err)}`, 500);
+  }
+}
+
+function requireTenantOrganization(context: AppAuthContext): Response | null {
+  if (!context.organization.isBootstrap) return null;
+  return jsonError(
+    "Create a real organization and assign your admin user before using tenant workspace data.",
+    403,
+  );
+}
+
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function normalizedDuration(durationSec: unknown): number | undefined {
+  if (typeof durationSec !== "number" || Number.isNaN(durationSec)) return undefined;
+  return Math.max(1, Math.min(120, Math.round(durationSec)));
+}
+
+function titleFromPrompt(prompt: string): string {
+  const words = prompt.trim().split(/\s+/).slice(0, 7).join(" ");
+  return words || "Untitled project";
+}
+
+function slugify(value: string): string {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "organization"
+  );
+}
+
+function seededExamples() {
+  return [
+    {
+      id: "bundled-cloudflare-intro",
+      title: "Cloudflare Render Intro",
+      description: "Bundled starter composition for the Motion Frames render pipeline.",
+      durationSec: 6,
+      width: 1920,
+      height: 1080,
+      source: "bundled",
+    },
+  ];
 }

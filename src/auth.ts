@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { admin } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 
 import { createDb, type DbEnv } from "./db";
@@ -23,7 +24,15 @@ export function createAuth(env: AuthEnv) {
     }),
     emailAndPassword: {
       enabled: true,
+      disableSignUp: true,
     },
-    plugins: [tanstackStartCookies()],
+    plugins: [
+      admin({
+        defaultRole: "user",
+        adminRoles: ["admin"],
+        bannedUserMessage: "Your Motion Frames account is locked. Contact your administrator.",
+      }),
+      tanstackStartCookies(),
+    ],
   });
 }

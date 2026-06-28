@@ -8,3 +8,8 @@ OPENROUTER_API_KEY=
 DATABASE_URL="postgresql://USER:PASSWORD@HOST.neon.tech/neondb?sslmode=require"
 BETTER_AUTH_SECRET="replace-with-a-long-random-secret"
 BETTER_AUTH_URL="http://localhost:5173"
+
+# Optional bootstrap: comma-separated emails that should be treated as admins
+# even before a Motion Frames membership exists. Create or seed the matching
+# Better Auth user first, then remove this after assigning a real admin user.
+INITIAL_ADMIN_EMAILS="admin@example.com"

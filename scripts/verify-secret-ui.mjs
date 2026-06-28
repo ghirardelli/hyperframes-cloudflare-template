@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [html, worker, readme, devVars] = await Promise.all([
-  readFile("public/index.html", "utf8"),
-  readFile("src/index.ts", "utf8"),
+const [workspaceRoute, worker, readme, devVars] = await Promise.all([
+  readFile("src/routes/index.tsx", "utf8"),
+  readFile("src/worker/render-api.ts", "utf8"),
   readFile("README.md", "utf8"),
   readFile(".dev.vars.example", "utf8"),
 ]);
@@ -17,9 +17,9 @@ for (const forbidden of [
   "JSON.stringify({ apiKey, prompt",
 ]) {
   assert.equal(
-    html.includes(forbidden),
+    workspaceRoute.includes(forbidden),
     false,
-    `public/index.html must not expose browser-side OpenRouter key flow: ${forbidden}`,
+    `src/routes/index.tsx must not expose browser-side OpenRouter key flow: ${forbidden}`,
   );
 }
 
