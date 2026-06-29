@@ -86,6 +86,46 @@ describe("prompt agent server tools", () => {
     ).rejects.toThrow();
   });
 
+  it("exposes read-only skill catalog tools without touching projects or generation", async () => {
+    const generateHyperframe = vi.fn();
+    const toolRuntime = runtime(generateHyperframe);
+    const listTool = getTool("list_hyperframes_skill_catalog");
+    const routeTool = getTool("route_hyperframes_workflow");
+    const loadTool = getTool("load_hyperframes_skill");
+
+    expect(listTool.needsApproval).not.toBe(true);
+    expect(routeTool.needsApproval).not.toBe(true);
+    expect(loadTool.needsApproval).not.toBe(true);
+
+    const list = await listTool.execute({}, { context: toolRuntime } as never);
+    expect(list.groups.workflow.map((skill: { id: string }) => skill.id)).toEqual(
+      expect.arrayContaining(["website-to-video", "product-launch-video"]),
+    );
+
+    const route = await routeTool.execute(
+      { message: "Make a website video from https://example.com" },
+      { context: toolRuntime } as never,
+    );
+    expect(route).toMatchObject({
+      workflowId: "website-to-video",
+      fullPipelineAvailable: false,
+      requiresWorkflowRunner: true,
+    });
+
+    const loaded = await loadTool.execute(
+      { skillId: "website-to-video", maxChars: 500 },
+      { context: toolRuntime } as never,
+    );
+    expect(loaded).toMatchObject({
+      found: true,
+      skillId: "website-to-video",
+      truncated: true,
+    });
+
+    expect(generateHyperframe).not.toHaveBeenCalled();
+    expect(toolMocks.requireProjectAccess).not.toHaveBeenCalled();
+  });
+
   it("propagates project access denial when inspecting another organization", async () => {
     toolMocks.requireProjectAccess.mockRejectedValue(new ForbiddenError("organization access denied"));
     const tool = getTool("inspect_project_context");

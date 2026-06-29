@@ -1,6 +1,14 @@
 import { toolDefinition } from "@tanstack/ai/client";
 import { z } from "zod";
 
+import {
+  hyperframesCatalogListOutputSchema,
+  hyperframesLoadSkillInputSchema,
+  hyperframesLoadSkillOutputSchema,
+  hyperframesWorkflowRouteOutputSchema,
+  hyperframesWorkflowRouteRequestSchema,
+} from "./hyperframes-skill-catalog-schema";
+
 export const promptAgentForwardedPropsSchema = z.object({
   projectId: z.string().trim().min(1).max(200).optional(),
   currentPrompt: z.string().max(8_000).optional(),
@@ -37,6 +45,14 @@ export const promptChecklistItemSchema = z.object({
   notes: z.string().min(1).max(240),
 });
 
+export const promptAgentSkillProvenanceSchema = z.object({
+  workflowId: z.string().nullable(),
+  loadedSkillIds: z.array(z.string().min(1).max(120)).max(16),
+  sourceRevision: z.string().max(600),
+  fullPipelineAvailable: z.boolean(),
+  capabilityNotice: z.string().max(700).optional(),
+});
+
 export const promptAgentResultSchema = z.object({
   assistantMessage: z.string().min(1).max(1_200),
   title: z.string().max(120),
@@ -57,6 +73,7 @@ export const promptAgentResultSchema = z.object({
     "none",
   ]),
   followUpQuestions: z.array(z.string().min(1).max(240)).max(4),
+  skillProvenance: promptAgentSkillProvenanceSchema.optional(),
 });
 
 export type PromptAgentResult = z.infer<typeof promptAgentResultSchema>;
@@ -126,6 +143,27 @@ export const getHyperframesGuidelinesTool = toolDefinition({
   description: "Return the HyperFrames composition rules needed to prepare render-safe prompts.",
   inputSchema: z.object({}),
   outputSchema: hyperframesGuidelinesSchema,
+});
+
+export const listHyperframesSkillCatalogTool = toolDefinition({
+  name: "list_hyperframes_skill_catalog",
+  description: "Read-only. List the synced HyperFrames skill catalog groups and source revision without loading full markdown.",
+  inputSchema: z.object({}),
+  outputSchema: hyperframesCatalogListOutputSchema,
+});
+
+export const routeHyperframesWorkflowTool = toolDefinition({
+  name: "route_hyperframes_workflow",
+  description: "Read-only. Route a user request to the relevant HyperFrames workflow and domain skills, including full-pipeline availability.",
+  inputSchema: hyperframesWorkflowRouteRequestSchema,
+  outputSchema: hyperframesWorkflowRouteOutputSchema,
+});
+
+export const loadHyperframesSkillTool = toolDefinition({
+  name: "load_hyperframes_skill",
+  description: "Read-only. Load bounded markdown instructions for one synced HyperFrames skill plus its reference index.",
+  inputSchema: hyperframesLoadSkillInputSchema,
+  outputSchema: hyperframesLoadSkillOutputSchema,
 });
 
 export const inspectProjectContextTool = toolDefinition({

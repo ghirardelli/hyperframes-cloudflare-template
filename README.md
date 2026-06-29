@@ -56,6 +56,25 @@ wrangler secret put BETTER_AUTH_API_KEY
 `OPENROUTER_MODEL` can stay in `wrangler.jsonc` vars if you want a non-default
 model.
 
+### HyperFrames Skill Catalog
+
+The prompt agent uses a generated, read-only HyperFrames skill catalog from the
+private fork at `https://github.com/aaronpie/hyperframes.git`. Runtime chat
+requests never fetch GitHub; sync the catalog explicitly:
+
+```bash
+npm run sync:hyperframes-skills
+npm run check:hyperframes-skills
+```
+
+Local sync can use existing Git credentials, an SSH agent, or GitHub CLI auth.
+CI can provide a read-only token with `HYPERFRAMES_SKILLS_GITHUB_TOKEN`; `GH_TOKEN`
+or `GITHUB_TOKEN` are accepted as fallbacks. Override the repo, source URL, ref,
+or output path with `HYPERFRAMES_SKILLS_REPO_URL`,
+`HYPERFRAMES_SKILLS_SOURCE_URL`, `HYPERFRAMES_SKILLS_REF`, and
+`HYPERFRAMES_SKILLS_OUTPUT`. The generated artifact records only sanitized source
+metadata, skill markdown, reference indexes, and hashes.
+
 Better Auth is mounted at `/api/auth`, so for a Worker deployed at
 `https://hyperframes-cloudflare-template.aaron-3f2.workers.dev`, set
 `BETTER_AUTH_URL` to that origin only. The Dash ownership verifier should check

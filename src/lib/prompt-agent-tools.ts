@@ -4,17 +4,27 @@ import {
   generateHyperframeTool,
   getHyperframesGuidelinesTool,
   inspectProjectContextTool,
+  listHyperframesSkillCatalogTool,
+  loadHyperframesSkillTool,
   preparePromptPackageTool,
   promptAgentResultSchema,
+  routeHyperframesWorkflowTool,
   type GenerateHyperframeOutput,
 } from "./prompt-agent-contract";
+import {
+  listHyperframesSkillCatalog,
+  loadHyperframesSkill,
+  routeHyperframesWorkflow,
+} from "./hyperframes-skill-catalog";
 import type { WorkerEnv } from "../worker/render-api";
 
 export interface PromptAgentToolContext {
   env: WorkerEnv;
   auth: AppAuthContext;
   forwardedProjectId?: string;
+  forwardedPrompt?: string;
   forwardedDurationSec?: number;
+  forwardedActiveProjectTitle?: string;
   generateHyperframe: (input: {
     prompt: string;
     durationSec?: number;
@@ -26,6 +36,16 @@ export interface PromptAgentToolContext {
 export function createPromptAgentServerTools() {
   return [
     getHyperframesGuidelinesTool.server(async () => getHyperframesGuidelines()),
+    listHyperframesSkillCatalogTool.server(async () => listHyperframesSkillCatalog()),
+    routeHyperframesWorkflowTool.server(async (args, execution) => {
+      const runtime = requireRuntimeContext(execution?.context as PromptAgentToolContext | undefined);
+      return routeHyperframesWorkflow({
+        message: args.message,
+        currentPrompt: args.currentPrompt ?? runtime.forwardedPrompt,
+        activeProjectTitle: args.activeProjectTitle ?? runtime.forwardedActiveProjectTitle,
+      });
+    }),
+    loadHyperframesSkillTool.server(async (args) => loadHyperframesSkill(args)),
     inspectProjectContextTool.server(async (args, execution) => {
       const runtime = requireRuntimeContext(execution?.context as PromptAgentToolContext | undefined);
       const projectId = args.projectId || runtime.forwardedProjectId;

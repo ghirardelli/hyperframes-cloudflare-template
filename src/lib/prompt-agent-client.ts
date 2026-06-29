@@ -43,6 +43,12 @@ export function promptAgentToolLabel(name: string): string {
   switch (name) {
     case "get_hyperframes_guidelines":
       return "HyperFrames guidance";
+    case "list_hyperframes_skill_catalog":
+      return "Skill catalog";
+    case "route_hyperframes_workflow":
+      return "Workflow route";
+    case "load_hyperframes_skill":
+      return "Load skill";
     case "inspect_project_context":
       return "Project context";
     case "prepare_prompt_package":

@@ -37,6 +37,8 @@
     "deploy:dry-run": "npm run build && wrangler deploy --config dist/server/wrangler.json --dry-run",
     "test": "vitest run --config vitest.config.ts",
     "test:secret-ui": "node scripts/verify-secret-ui.mjs",
+    "sync:hyperframes-skills": "node scripts/sync-hyperframes-skills.mjs",
+    "check:hyperframes-skills": "node scripts/sync-hyperframes-skills.mjs --check",
     "pretypecheck": "wrangler types",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",

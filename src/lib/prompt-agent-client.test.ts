@@ -80,7 +80,11 @@ describe("prompt agent client helpers", () => {
 
   it("formats tool names, states, and previews for compact UI rendering", () => {
     expect(promptAgentToolLabel("generate_hyperframe")).toBe("Generate HyperFrame");
+    expect(promptAgentToolLabel("list_hyperframes_skill_catalog")).toBe("Skill catalog");
+    expect(promptAgentToolLabel("route_hyperframes_workflow")).toBe("Workflow route");
+    expect(promptAgentToolLabel("load_hyperframes_skill")).toBe("Load skill");
     expect(formatAgentToolState("approval-requested")).toBe("approval");
     expect(safePreview({ prompt: "x".repeat(250) }, 40)).toHaveLength(40);
+    expect(safePreview({ markdown: "x".repeat(10_000) }, 80)).toHaveLength(80);
   });
 });

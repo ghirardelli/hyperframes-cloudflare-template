@@ -192,9 +192,23 @@ describe("prompt agent worker route", () => {
         outputSchema: expect.any(Object),
         context: expect.objectContaining({
           auth: memberContext,
+          forwardedPrompt: "A launch reel",
           forwardedDurationSec: 8,
+          forwardedActiveProjectTitle: "Launch Reel",
         }),
       }),
+    );
+    const chatConfig = apiMocks.chat.mock.calls[0][0];
+    expect(chatConfig.systemPrompts[0]).toContain("route_hyperframes_workflow");
+    expect(chatConfig.systemPrompts[0]).toContain("fullPipelineAvailable=false");
+    expect(chatConfig.systemPrompts[0]).toContain("must not claim website capture");
+    expect(chatConfig.tools.map((tool: { name: string }) => tool.name)).toEqual(
+      expect.arrayContaining([
+        "list_hyperframes_skill_catalog",
+        "route_hyperframes_workflow",
+        "load_hyperframes_skill",
+        "generate_hyperframe",
+      ]),
     );
     expect(apiMocks.toServerSentEventsResponse).toHaveBeenCalled();
   });
