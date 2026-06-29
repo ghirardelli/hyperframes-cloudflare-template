@@ -12,11 +12,16 @@
   // Public-demo deployers: flip ENABLE_AI_GEN to "false" so visitors can't
   // run the render container on your account from generated HTML.
   "vars": {
-    "ENABLE_AI_GEN": "true"
+    "ENABLE_AI_GEN": "true",
     // Optional first-admin bootstrap. Remove after assigning real admin users:
     // "INITIAL_ADMIN_EMAILS": "admin@example.com"
     // Optional model override:
     // "OPENROUTER_MODEL": "google/gemini-3-flash-preview"
+    "BUNNY_STORAGE_ZONE_NAME": "motionframes-projects-staging",
+    "BUNNY_STORAGE_ENDPOINT": "https://la.storage.bunnycdn.com",
+    "BUNNY_STREAM_LIBRARY_ID": "693756",
+    "BUNNY_STREAM_API_BASE": "https://video.bunnycdn.com",
+    "BUNNY_STREAM_COLLECTION_ID": "739591c5-cc47-4647-a270-4fdb3f9e54b5"
   },
 
   "assets": {

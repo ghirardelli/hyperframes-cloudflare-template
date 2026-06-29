@@ -1,7 +1,9 @@
 import {
   bigint,
   boolean,
+  index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -109,9 +111,63 @@ export const projects = pgTable("projects", {
   currentHtml: text("current_html"),
   durationSec: integer("duration_sec").notNull().default(6),
   status: text("status").notNull().default("draft"),
+  visibility: text("visibility").notNull().default("private"),
+  sharedById: text("shared_by_id").references(() => users.id, { onDelete: "set null" }),
+  sharedAt: timestamp("shared_at", { mode: "date" }),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
 });
+
+export const projectMembers = pgTable(
+  "project_members",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("viewer"),
+    invitedById: text("invited_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => ({
+    projectUserUnique: uniqueIndex("project_members_project_id_user_id_unique").on(
+      table.projectId,
+      table.userId,
+    ),
+    projectRoleIdx: index("project_members_project_role_idx").on(table.projectId, table.role),
+  }),
+);
+
+export const projectPermissionAudits = pgTable(
+  "project_permission_audits",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    action: text("action").notNull(),
+    targetUserId: text("target_user_id").references(() => users.id, { onDelete: "set null" }),
+    previousValue: text("previous_value"),
+    newValue: text("new_value"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => ({
+    projectAuditIdx: index("project_permission_audits_project_id_idx").on(table.projectId),
+  }),
+);
 
 export const projectVersions = pgTable("project_versions", {
   id: text("id").primaryKey(),
@@ -139,11 +195,135 @@ export const renders = pgTable("renders", {
   userId: text("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
-  r2Key: text("r2_key").notNull().unique(),
+  r2Key: text("r2_key").unique(),
+  storageProvider: text("storage_provider").notNull().default("r2"),
+  storageKey: text("storage_key"),
+  contentType: text("content_type").notNull().default("video/mp4"),
+  format: text("format").notNull().default("mp4"),
+  streamLibraryId: text("stream_library_id"),
+  streamVideoId: text("stream_video_id"),
+  streamStatus: text("stream_status"),
+  streamPlaybackUrl: text("stream_playback_url"),
+  streamEmbedUrl: text("stream_embed_url"),
+  bunnyStorageKey: text("bunny_storage_key"),
+  snapshotId: text("snapshot_id"),
   sourceType: text("source_type").notNull(),
   durationMs: integer("duration_ms").notNull().default(0),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
 });
+
+export const projectEntries = pgTable(
+  "project_entries",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdById: text("created_by_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+    path: text("path").notNull(),
+    kind: text("kind").notNull().default("text"),
+    artifactRole: text("artifact_role").notNull().default("source"),
+    storageProvider: text("storage_provider").notNull().default("postgres"),
+    storageKey: text("storage_key"),
+    streamLibraryId: text("stream_library_id"),
+    streamVideoId: text("stream_video_id"),
+    contentType: text("content_type"),
+    size: integer("size").notNull().default(0),
+    sha256: text("sha256"),
+    textContent: text("text_content"),
+    searchText: text("search_text"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    deletedAt: timestamp("deleted_at", { mode: "date" }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => ({
+    projectPathUnique: uniqueIndex("project_entries_project_id_path_unique").on(
+      table.projectId,
+      table.path,
+    ),
+    orgProjectIdx: index("project_entries_org_project_idx").on(
+      table.organizationId,
+      table.projectId,
+    ),
+    searchIdx: index("project_entries_search_idx").on(table.searchText),
+  }),
+);
+
+export const projectEntryVersions = pgTable(
+  "project_entry_versions",
+  {
+    id: text("id").primaryKey(),
+    entryId: text("entry_id")
+      .notNull()
+      .references(() => projectEntries.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    createdById: text("created_by_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    kind: text("kind").notNull(),
+    artifactRole: text("artifact_role").notNull().default("source"),
+    storageProvider: text("storage_provider").notNull().default("postgres"),
+    storageKey: text("storage_key"),
+    contentType: text("content_type"),
+    size: integer("size").notNull().default(0),
+    sha256: text("sha256"),
+    textContent: text("text_content"),
+    changeKind: text("change_kind").notNull().default("save"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => ({
+    entryCreatedIdx: index("project_entry_versions_entry_created_idx").on(
+      table.entryId,
+      table.createdAt,
+    ),
+    projectCreatedIdx: index("project_entry_versions_project_created_idx").on(
+      table.projectId,
+      table.createdAt,
+    ),
+  }),
+);
+
+export const projectSnapshots = pgTable(
+  "project_snapshots",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    createdById: text("created_by_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull().default("manual"),
+    manifest: jsonb("manifest").$type<Array<{ path: string; versionId: string }>>().notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => ({
+    projectCreatedIdx: index("project_snapshots_project_created_idx").on(
+      table.projectId,
+      table.createdAt,
+    ),
+  }),
+);
 
 // Multi-file project source. Each row is one text source file (index.html,
 // compositions/*.html, etc.) keyed uniquely by (projectId, path). Organization
@@ -160,6 +340,7 @@ export const projectFiles = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     path: text("path").notNull(),
     content: text("content").notNull().default(""),
+    entryId: text("entry_id").references(() => projectEntries.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
   },
@@ -184,13 +365,19 @@ export const projectAssets = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     path: text("path").notNull(),
-    r2Key: text("r2_key").notNull().unique(),
+    r2Key: text("r2_key").unique(),
+    entryId: text("entry_id").references(() => projectEntries.id, { onDelete: "set null" }),
+    storageProvider: text("storage_provider").notNull().default("r2"),
+    storageKey: text("storage_key"),
+    artifactRole: text("artifact_role").notNull().default("asset"),
+    sha256: text("sha256"),
     contentType: text("content_type").notNull(),
     size: integer("size").notNull().default(0),
     createdById: text("created_by_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
   },
   (table) => ({
     projectPathUnique: uniqueIndex("project_assets_project_id_path_unique").on(

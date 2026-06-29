@@ -43,6 +43,7 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:reindex-projects": "node scripts/reindex-project-entries.mjs",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {

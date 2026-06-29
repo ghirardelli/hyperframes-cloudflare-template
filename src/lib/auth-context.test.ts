@@ -5,8 +5,10 @@ import {
   ForbiddenError,
   assertAdmin,
   assertSameOrganization,
+  canProjectRole,
   isAdminRole,
   isBootstrapAdminEmail,
+  isOrganizationAdmin,
   isUserLocked,
   type AppAuthContext,
 } from "./auth-context";
@@ -64,6 +66,24 @@ describe("auth context helpers", () => {
         user: { ...baseContext.user, role: "admin" },
       }),
     ).not.toThrow();
+  });
+
+  it("detects organization admin access", () => {
+    expect(isOrganizationAdmin(baseContext)).toBe(false);
+    expect(
+      isOrganizationAdmin({
+        ...baseContext,
+        organization: { ...baseContext.organization, role: "admin" },
+      }),
+    ).toBe(true);
+  });
+
+  it("maps project member roles to permissions", () => {
+    expect(canProjectRole("viewer", "read")).toBe(true);
+    expect(canProjectRole("viewer", "edit")).toBe(false);
+    expect(canProjectRole("editor", "restore")).toBe(true);
+    expect(canProjectRole("editor", "share")).toBe(false);
+    expect(canProjectRole("owner", "share")).toBe(true);
   });
 
   it("requires an authenticated context before tenant checks", () => {

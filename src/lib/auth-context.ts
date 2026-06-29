@@ -1,10 +1,11 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { createAuth, type AuthEnv } from "../auth";
 import { createDb } from "../db";
 import {
   organizationMemberships,
   organizations,
+  projectMembers,
   publishedProjects,
   projects,
 } from "../db/schema";
@@ -21,6 +22,7 @@ export interface AppUser {
 export interface AppOrganization {
   id: string;
   name: string;
+  role?: string | null;
   isBootstrap?: boolean;
 }
 
@@ -94,6 +96,19 @@ export function assertSameOrganization(
   }
 }
 
+export type ProjectPermission = "read" | "edit" | "share" | "render" | "publish" | "restore";
+
+export function isOrganizationAdmin(context: AppAuthContext): boolean {
+  return isAdminRole(context.user.role) || isAdminRole(context.organization.role);
+}
+
+export function canProjectRole(role: string | null | undefined, permission: ProjectPermission): boolean {
+  if (role === "owner") return true;
+  if (role === "editor") return permission !== "share";
+  if (role === "viewer") return permission === "read" || permission === "render";
+  return false;
+}
+
 export async function requireAuthContext(
   request: Request,
   env: TenantAuthEnv,
@@ -119,6 +134,7 @@ export async function getAuthContext(
     .select({
       organizationId: organizations.id,
       organizationName: organizations.name,
+      organizationRole: organizationMemberships.organizationRole,
     })
     .from(organizationMemberships)
     .innerJoin(
@@ -144,13 +160,15 @@ export async function getAuthContext(
       banExpires: rawUser.banExpires ?? null,
     },
     organization: membership
-      ? {
+        ? {
           id: membership.organizationId,
           name: membership.organizationName,
+          role: membership.organizationRole,
         }
       : {
           id: "__bootstrap__",
           name: "Bootstrap admin",
+          role: "admin",
           isBootstrap: true,
         },
   };
@@ -160,6 +178,7 @@ export async function requireProjectAccess(
   context: AppAuthContext,
   projectId: string,
   env: TenantAuthEnv,
+  permission: ProjectPermission = "read",
 ) {
   const db = createDb(env);
   const rows = await db
@@ -170,7 +189,37 @@ export async function requireProjectAccess(
   const project = rows[0];
   if (!project) throw new ForbiddenError("project access denied");
   assertSameOrganization(context, project.organizationId);
-  return project;
+
+  if (isOrganizationAdmin(context) || project.ownerId === context.user.id) {
+    return project;
+  }
+
+  const visibility = project.visibility ?? "organization";
+  const isLegacyRow = project.ownerId == null && project.visibility == null;
+  if ((visibility === "organization" || isLegacyRow) && (permission === "read" || permission === "render")) {
+    return project;
+  }
+
+  const memberRows = await db
+    .select({ role: projectMembers.role })
+    .from(projectMembers)
+    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, context.user.id)))
+    .limit(1);
+  if (canProjectRole(memberRows[0]?.role, permission)) {
+    return project;
+  }
+
+  if (visibility === "organization" && permission === "publish") {
+    return project;
+  }
+
+  console.warn("Project access denied", {
+    projectId,
+    organizationId: project.organizationId,
+    userId: context.user.id,
+    permission,
+  });
+  throw new ForbiddenError("project access denied");
 }
 
 export async function requirePublishedProjectAccess(

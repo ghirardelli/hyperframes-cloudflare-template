@@ -78,6 +78,7 @@ const member = {
 
 describe("studio multi-file API", () => {
   beforeEach(() => {
+    vi.unstubAllGlobals();
     mocks.requireAuthContext.mockReset();
     mocks.requireAuthContext.mockResolvedValue(member);
     mocks.selectRows = [];
@@ -106,6 +107,7 @@ describe("studio multi-file API", () => {
   it("lists files for the owning organization", async () => {
     mocks.selectRows = [
       [{ id: "p1", organizationId: "org-1" }], // requireProjectAccess
+      [], // project_entries list
       [{ path: "index.html" }, { path: "compositions/intro.html" }], // list
     ];
     const res = await handleWorkerApi(
@@ -113,13 +115,17 @@ describe("studio multi-file API", () => {
       env,
     );
     expect(res?.status).toBe(200);
-    await expect(res?.json()).resolves.toEqual({
+    await expect(res?.json()).resolves.toMatchObject({
       files: ["index.html", "compositions/intro.html"],
+      entries: [
+        { path: "index.html", kind: "text" },
+        { path: "compositions/intro.html", kind: "text" },
+      ],
     });
   });
 
   it("upserts a file's content", async () => {
-    mocks.selectRows = [[{ id: "p1", organizationId: "org-1" }]]; // requireProjectAccess
+    mocks.selectRows = [[{ id: "p1", organizationId: "org-1", ownerId: "user-1", visibility: "private" }]]; // requireProjectAccess
     const res = await handleWorkerApi(
       new Request("https://mf.test/api/projects/p1/files/index.html", {
         method: "PUT",
@@ -150,5 +156,38 @@ describe("studio multi-file API", () => {
     );
     expect(res?.status).toBe(200);
     await expect(res?.json()).resolves.toEqual({ path: "index.html", content: "<h1>hi</h1>" });
+  });
+
+  it("uploads new assets to Bunny Storage when configured", async () => {
+    const fetchMock = vi.fn(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    mocks.selectRows = [[{ id: "p1", organizationId: "org-1", ownerId: "user-1", visibility: "private" }]];
+
+    const res = await handleWorkerApi(
+      new Request("https://mf.test/api/projects/p1/assets?path=assets/logo.png", {
+        method: "POST",
+        headers: { "content-type": "image/png" },
+        body: "PNG",
+      }),
+      {
+        ...env,
+        BUNNY_STORAGE_ZONE_NAME: "zone",
+        BUNNY_STORAGE_ACCESS_KEY: "storage-secret",
+        BUNNY_STORAGE_ENDPOINT: "https://la.storage.bunnycdn.com",
+      },
+    );
+
+    expect(res?.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://la.storage.bunnycdn.com/zone/orgs/org-1/users/user-1/projects/p1/workspace/assets/logo.png",
+      expect.objectContaining({ method: "PUT" }),
+    );
+    expect(mocks.inserts).toContainEqual(
+      expect.objectContaining({
+        path: "assets/logo.png",
+        storageProvider: "bunny-storage",
+        storageKey: "orgs/org-1/users/user-1/projects/p1/workspace/assets/logo.png",
+      }),
+    );
   });
 });

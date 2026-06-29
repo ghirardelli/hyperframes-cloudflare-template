@@ -1,5 +1,5 @@
 import { getContainer } from "@cloudflare/containers";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, or } from "drizzle-orm";
 
 import { createAuth } from "../auth";
 import manifest from "../composition-manifest.json";
@@ -8,6 +8,11 @@ import { createDb } from "../db";
 import {
   organizationMemberships,
   organizations,
+  projectEntries,
+  projectEntryVersions,
+  projectMembers,
+  projectPermissionAudits,
+  projectSnapshots,
   projectVersions,
   projects,
   publishedProjects,
@@ -19,17 +24,27 @@ import {
   AuthRequiredError,
   ForbiddenError,
   assertAdmin,
+  isOrganizationAdmin,
   requireAuthContext,
   requireProjectAccess,
   requirePublishedProjectAccess,
   type AppAuthContext,
   type TenantAuthEnv,
 } from "../lib/auth-context";
+import {
+  BunnyApiError,
+  BunnyStreamClient,
+  getBunnyStreamConfig,
+  isBunnyStreamConfigured,
+  type BunnyEnv,
+} from "../lib/bunny";
 import { DEFAULT_MODEL, generateComposition, GenerateError } from "../lib/generate";
+import { normalizeProjectPath } from "../lib/project-paths";
+import { projectRenderArchiveKey, writeProjectObject } from "../lib/project-storage";
 import { handleStudioFilesApi, renderProjectPreview, upsertProjectFile } from "./studio-files-api";
 import { handlePromptAgentChat } from "./prompt-agent-api";
 
-export interface WorkerEnv extends TenantAuthEnv {
+export interface WorkerEnv extends TenantAuthEnv, BunnyEnv {
   ASSETS: Fetcher;
   RENDER_CONTAINER: DurableObjectNamespace<RenderContainer>;
   RENDERS: R2Bucket;
@@ -251,6 +266,7 @@ async function handleRender(
 
   let files: Array<{ path: string; content: string }>;
   let source: "bundled" | "html" = "bundled";
+  let project: typeof projects.$inferSelect | null = null;
 
   let body: RenderRequestBody | null = null;
   if (isJsonRequest(req)) {
@@ -271,7 +287,7 @@ async function handleRender(
     files = htmlToFiles(body.html);
     source = "html";
   } else if (body?.projectId) {
-    const project = await requireProjectAccess(context, body.projectId, env);
+    project = await requireProjectAccess(context, body.projectId, env, "render");
     if (!project.currentHtml) return jsonError("project has no composition HTML", 400);
     files = htmlToFiles(project.currentHtml);
     source = "html";
@@ -306,17 +322,117 @@ async function handleRender(
     return jsonError(`render failed (${containerRes.status}): ${errBody}`, 502);
   }
 
-  const key = `renders/${context.organization.id}/${Date.now()}-${crypto.randomUUID()}.${renderFormat}`;
-  await env.RENDERS.put(key, containerRes.body, {
-    httpMetadata: { contentType: RENDER_CONTENT_TYPES[renderFormat] ?? "video/mp4" },
-  });
+  const renderId = crypto.randomUUID();
+  const bytes = new Uint8Array(await containerRes.arrayBuffer());
+  const contentType = RENDER_CONTENT_TYPES[renderFormat] ?? "video/mp4";
+  const snapshotId = project ? await createProjectSnapshot(env, context, project.id, "render") : null;
+
+  if (isBunnyStreamConfigured(env)) {
+    const streamConfig = getBunnyStreamConfig(env);
+    if (!streamConfig) return jsonError("Bunny Stream is not fully configured", 500);
+    const stream = new BunnyStreamClient(streamConfig);
+    try {
+      const video = await stream.createVideo({
+        title: project?.title || `Render ${renderId}`,
+        collectionId: streamConfig.collectionId,
+      });
+      await stream.uploadVideo(video.guid, bytes, contentType);
+
+      let archiveKey: string | null = null;
+      if (project) {
+        const archive = await writeProjectObject(env, {
+          key: projectRenderArchiveKey({
+            organizationId: context.organization.id,
+            ownerId: project.ownerId,
+            projectId: project.id,
+            renderId,
+            filename: `output.${renderFormat}`,
+          }),
+          bytes,
+          contentType,
+        });
+        archiveKey = archive.provider === "bunny-storage" ? archive.key : null;
+      }
+
+      const embedUrl = stream.embedUrl(video.guid);
+      const playbackUrl = stream.playbackUrl(video.guid);
+      await createDb(env).insert(renders).values({
+        id: renderId,
+        projectId: body?.projectId ?? null,
+        organizationId: context.organization.id,
+        userId: context.user.id,
+        r2Key: null,
+        storageProvider: "bunny-stream",
+        storageKey: video.guid,
+        contentType,
+        format: renderFormat,
+        streamLibraryId: streamConfig.libraryId,
+        streamVideoId: video.guid,
+        streamStatus: video.status == null ? "uploaded" : String(video.status),
+        streamPlaybackUrl: playbackUrl,
+        streamEmbedUrl: embedUrl,
+        bunnyStorageKey: archiveKey,
+        snapshotId,
+        sourceType: source,
+        durationMs: Date.now() - t0,
+      });
+      if (project) {
+        await recordRenderEntry(env, context, project, {
+          renderId,
+          format: renderFormat,
+          contentType,
+          streamLibraryId: streamConfig.libraryId,
+          streamVideoId: video.guid,
+          streamEmbedUrl: embedUrl,
+          streamPlaybackUrl: playbackUrl,
+          storageKey: archiveKey,
+        });
+      }
+      return Response.json({
+        id: renderId,
+        url: `/api/renders/${renderId}`,
+        key: video.guid,
+        source,
+        format: renderFormat,
+        streamStatus: video.status == null ? "uploaded" : String(video.status),
+        durationMs: Date.now() - t0,
+      });
+    } catch (err) {
+      console.error("Bunny Stream render upload failed", msg(err));
+      await createDb(env).insert(renders).values({
+        id: renderId,
+        projectId: body?.projectId ?? null,
+        organizationId: context.organization.id,
+        userId: context.user.id,
+        r2Key: null,
+        storageProvider: "bunny-stream",
+        storageKey: null,
+        contentType,
+        format: renderFormat,
+        streamStatus: "failed",
+        snapshotId,
+        sourceType: source,
+        durationMs: Date.now() - t0,
+      });
+      const status = err instanceof BunnyApiError ? 502 : 500;
+      return jsonError(`stream upload failed: ${msg(err)}`, status);
+    }
+  }
+
+  const key = `renders/${context.organization.id}/${Date.now()}-${renderId}.${renderFormat}`;
+  await env.RENDERS.put(key, bytes, { httpMetadata: { contentType } });
 
   await createDb(env).insert(renders).values({
-    id: crypto.randomUUID(),
+    id: renderId,
     projectId: body?.projectId ?? null,
     organizationId: context.organization.id,
     userId: context.user.id,
     r2Key: key,
+    storageProvider: "r2",
+    storageKey: key,
+    contentType,
+    format: renderFormat,
+    snapshotId,
     sourceType: source,
     durationMs: Date.now() - t0,
   });
@@ -454,6 +570,232 @@ async function handleR2Get(
   return new Response(obj.body, { headers });
 }
 
+async function handleRenderPlayback(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  renderId: string,
+): Promise<Response> {
+  const rows = await createDb(env)
+    .select()
+    .from(renders)
+    .where(eq(renders.id, renderId))
+    .limit(1);
+  const render = rows[0];
+  if (!render || render.organizationId !== context.organization.id) {
+    return new Response("not found", { status: 404 });
+  }
+  if (render.projectId) {
+    await requireProjectAccess(context, render.projectId, env, "render");
+  }
+  if (render.storageProvider === "bunny-stream") {
+    const target = render.streamEmbedUrl || render.streamPlaybackUrl;
+    if (!target) return jsonError("render is not ready", 409);
+    return Response.redirect(target, 302);
+  }
+  if (render.r2Key) {
+    return new Response(null, { status: 302, headers: { location: `/r/${render.r2Key}` } });
+  }
+  return jsonError("render is not ready", 409);
+}
+
+async function createProjectSnapshot(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  projectId: string,
+  reason: string,
+): Promise<string> {
+  const versions = await createDb(env)
+    .select({
+      id: projectEntryVersions.id,
+      path: projectEntryVersions.path,
+      createdAt: projectEntryVersions.createdAt,
+    })
+    .from(projectEntryVersions)
+    .where(and(eq(projectEntryVersions.projectId, projectId), eq(projectEntryVersions.organizationId, context.organization.id)))
+    .orderBy(desc(projectEntryVersions.createdAt));
+
+  const seen = new Set<string>();
+  const manifest = [];
+  for (const version of versions) {
+    if (seen.has(version.path)) continue;
+    seen.add(version.path);
+    manifest.push({ path: version.path, versionId: version.id });
+  }
+
+  const snapshotId = crypto.randomUUID();
+  await createDb(env).insert(projectSnapshots).values({
+    id: snapshotId,
+    projectId,
+    organizationId: context.organization.id,
+    createdById: context.user.id,
+    reason,
+    manifest,
+  });
+  return snapshotId;
+}
+
+async function recordProjectTextEntry(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  project: typeof projects.$inferSelect,
+  path: string,
+  content: string,
+  changeKind: string,
+): Promise<string> {
+  const normalized = normalizeProjectPath(path);
+  const entryId = projectEntryId(project.id, normalized);
+  const size = ENCODER.encode(content).byteLength;
+  const ownerId = project.ownerId || context.user.id;
+  await createDb(env)
+    .insert(projectEntries)
+    .values({
+      id: entryId,
+      projectId: project.id,
+      organizationId: context.organization.id,
+      ownerId,
+      createdById: context.user.id,
+      updatedById: context.user.id,
+      path: normalized,
+      kind: "text",
+      artifactRole: artifactRoleForPath(normalized),
+      storageProvider: "postgres",
+      contentType: mimeForPath(normalized),
+      size,
+      textContent: content,
+      searchText: `${normalized}\n${content}`,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [projectEntries.projectId, projectEntries.path],
+      set: {
+        kind: "text",
+        artifactRole: artifactRoleForPath(normalized),
+        storageProvider: "postgres",
+        contentType: mimeForPath(normalized),
+        size,
+        textContent: content,
+        searchText: `${normalized}\n${content}`,
+        deletedAt: null,
+        updatedById: context.user.id,
+        updatedAt: new Date(),
+      },
+    });
+  const versionId = crypto.randomUUID();
+  await createDb(env).insert(projectEntryVersions).values({
+    id: versionId,
+    entryId,
+    projectId: project.id,
+    organizationId: context.organization.id,
+    createdById: context.user.id,
+    path: normalized,
+    kind: "text",
+    artifactRole: artifactRoleForPath(normalized),
+    storageProvider: "postgres",
+    contentType: mimeForPath(normalized),
+    size,
+    textContent: content,
+    changeKind,
+  });
+  return versionId;
+}
+
+async function recordRenderEntry(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  project: typeof projects.$inferSelect,
+  input: {
+    renderId: string;
+    format: string;
+    contentType: string;
+    streamLibraryId: string;
+    streamVideoId: string;
+    streamEmbedUrl: string;
+    streamPlaybackUrl: string | null;
+    storageKey: string | null;
+  },
+): Promise<void> {
+  const path = `renders/${input.renderId}.${input.format}`;
+  const entryId = projectEntryId(project.id, path);
+  const ownerId = project.ownerId || context.user.id;
+  await createDb(env)
+    .insert(projectEntries)
+    .values({
+      id: entryId,
+      projectId: project.id,
+      organizationId: context.organization.id,
+      ownerId,
+      createdById: context.user.id,
+      updatedById: context.user.id,
+      path,
+      kind: "render",
+      artifactRole: "render",
+      storageProvider: "bunny-stream",
+      storageKey: input.storageKey,
+      streamLibraryId: input.streamLibraryId,
+      streamVideoId: input.streamVideoId,
+      contentType: input.contentType,
+      searchText: `${path}\n${project.title}`,
+      metadata: {
+        embedUrl: input.streamEmbedUrl,
+        playbackUrl: input.streamPlaybackUrl,
+      },
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [projectEntries.projectId, projectEntries.path],
+      set: {
+        kind: "render",
+        artifactRole: "render",
+        storageProvider: "bunny-stream",
+        storageKey: input.storageKey,
+        streamLibraryId: input.streamLibraryId,
+        streamVideoId: input.streamVideoId,
+        contentType: input.contentType,
+        deletedAt: null,
+        updatedById: context.user.id,
+        updatedAt: new Date(),
+      },
+    });
+  await createDb(env).insert(projectEntryVersions).values({
+    id: crypto.randomUUID(),
+    entryId,
+    projectId: project.id,
+    organizationId: context.organization.id,
+    createdById: context.user.id,
+    path,
+    kind: "render",
+    artifactRole: "render",
+    storageProvider: "bunny-stream",
+    storageKey: input.storageKey,
+    contentType: input.contentType,
+    changeKind: "render",
+    metadata: {
+      streamLibraryId: input.streamLibraryId,
+      streamVideoId: input.streamVideoId,
+      embedUrl: input.streamEmbedUrl,
+      playbackUrl: input.streamPlaybackUrl,
+    },
+  });
+}
+
+async function restoreEntryVersion(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  project: typeof projects.$inferSelect,
+  version: typeof projectEntryVersions.$inferSelect,
+  changeKind: string,
+): Promise<void> {
+  if (version.kind !== "text" || version.textContent == null) return;
+  await upsertProjectFile(createDb(env), context.organization.id, project.id, version.path, version.textContent);
+  await recordProjectTextEntry(env, context, project, version.path, version.textContent, changeKind);
+  if (version.path === "index.html") {
+    await createDb(env)
+      .update(projects)
+      .set({ currentHtml: version.textContent, updatedAt: new Date() })
+      .where(eq(projects.id, project.id));
+  }
+}
+
 async function handleAppApi(
   env: WorkerEnv,
   req: Request,
@@ -510,6 +852,12 @@ async function handleAppApi(
       if (req.method === "POST") return await handleCreateProject(env, req, auth);
     }
 
+    if (pathname === "/api/projects/search" && req.method === "GET") {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      return await handleProjectSearch(env, req, auth);
+    }
+
     const projectMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);
     if (projectMatch) {
       const tenant = requireTenantOrganization(auth);
@@ -530,6 +878,57 @@ async function handleAppApi(
       const tenant = requireTenantOrganization(auth);
       if (tenant) return tenant;
       return await handleListProjectRenders(env, auth, projectRendersMatch[1]);
+    }
+
+    const projectShareMatch = pathname.match(/^\/api\/projects\/([^/]+)\/share$/);
+    if (projectShareMatch) {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      if (req.method === "GET") return await handleGetProjectShare(env, auth, projectShareMatch[1]);
+      if (req.method === "PATCH") return await handleUpdateProjectShare(env, req, auth, projectShareMatch[1]);
+    }
+
+    const projectMembersMatch = pathname.match(/^\/api\/projects\/([^/]+)\/members(?:\/([^/]+))?$/);
+    if (projectMembersMatch) {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      if (req.method === "GET" && !projectMembersMatch[2]) {
+        return await handleListProjectMembers(env, auth, projectMembersMatch[1]);
+      }
+      if (req.method === "POST" && !projectMembersMatch[2]) {
+        return await handleAddProjectMember(env, req, auth, projectMembersMatch[1]);
+      }
+      if (req.method === "DELETE" && projectMembersMatch[2]) {
+        return await handleRemoveProjectMember(env, auth, projectMembersMatch[1], projectMembersMatch[2]);
+      }
+    }
+
+    const projectVersionsMatch = pathname.match(/^\/api\/projects\/([^/]+)\/versions$/);
+    if (projectVersionsMatch && req.method === "GET") {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      return await handleListProjectVersions(env, req, auth, projectVersionsMatch[1]);
+    }
+
+    const projectVersionRestoreMatch = pathname.match(/^\/api\/projects\/([^/]+)\/versions\/([^/]+)\/restore$/);
+    if (projectVersionRestoreMatch && req.method === "POST") {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      return await handleRestoreProjectVersion(env, auth, projectVersionRestoreMatch[1], projectVersionRestoreMatch[2]);
+    }
+
+    const projectSnapshotsMatch = pathname.match(/^\/api\/projects\/([^/]+)\/snapshots$/);
+    if (projectSnapshotsMatch && req.method === "GET") {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      return await handleListProjectSnapshots(env, auth, projectSnapshotsMatch[1]);
+    }
+
+    const projectSnapshotRestoreMatch = pathname.match(/^\/api\/projects\/([^/]+)\/snapshots\/([^/]+)\/restore$/);
+    if (projectSnapshotRestoreMatch && req.method === "POST") {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      return await handleRestoreProjectSnapshot(env, auth, projectSnapshotRestoreMatch[1], projectSnapshotRestoreMatch[2]);
     }
 
     // Multi-file Studio file/asset/preview-subpath routes (D1 + R2).
@@ -566,11 +965,19 @@ async function handleAppApi(
       if (tenant) return tenant;
       return await handleRemix(env, auth, remixMatch[1]);
     }
+
+    const renderPlaybackMatch = pathname.match(/^\/api\/renders\/([^/]+)$/);
+    if (renderPlaybackMatch && req.method === "GET") {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      return await handleRenderPlayback(env, auth, renderPlaybackMatch[1]);
+    }
   } catch (err) {
     if (err instanceof AuthRequiredError || err instanceof ForbiddenError) {
       return jsonError(err.message, err.status);
     }
-    return jsonError(msg(err), 500);
+    const status = typeof (err as { status?: unknown }).status === "number" ? (err as { status: number }).status : 500;
+    return jsonError(msg(err), status);
   }
 
   return null;
@@ -723,12 +1130,34 @@ async function handleListProjects(
   env: WorkerEnv,
   context: AppAuthContext,
 ): Promise<Response> {
-  const rows = await createDb(env)
-    .select()
+  const db = createDb(env);
+  if (isOrganizationAdmin(context)) {
+    const rows = await db
+      .select()
+      .from(projects)
+      .where(eq(projects.organizationId, context.organization.id))
+      .orderBy(desc(projects.updatedAt));
+    return Response.json({ projects: rows });
+  }
+  const rows = await db
+    .select({ project: projects })
     .from(projects)
-    .where(eq(projects.organizationId, context.organization.id))
+    .leftJoin(
+      projectMembers,
+      and(eq(projectMembers.projectId, projects.id), eq(projectMembers.userId, context.user.id)),
+    )
+    .where(
+      and(
+        eq(projects.organizationId, context.organization.id),
+        or(
+          eq(projects.ownerId, context.user.id),
+          eq(projects.visibility, "organization"),
+          eq(projectMembers.userId, context.user.id),
+        ),
+      ),
+    )
     .orderBy(desc(projects.updatedAt));
-  return Response.json({ projects: rows });
+  return Response.json({ projects: rows.map((row) => row.project) });
 }
 
 async function handleCreateProject(
@@ -760,6 +1189,65 @@ async function handleGetProject(
   return Response.json({ project });
 }
 
+async function handleProjectSearch(
+  env: WorkerEnv,
+  req: Request,
+  context: AppAuthContext,
+): Promise<Response> {
+  const query = new URL(req.url).searchParams.get("q")?.trim() ?? "";
+  if (query.length < 2) return Response.json({ projects: [], entries: [] });
+  const like = `%${query}%`;
+  const db = createDb(env);
+  const projectRows = await db
+    .select()
+    .from(projects)
+    .where(
+      and(
+        eq(projects.organizationId, context.organization.id),
+        or(ilike(projects.title, like), ilike(projects.prompt, like)),
+      ),
+    )
+    .orderBy(desc(projects.updatedAt));
+  const entryRows = await db
+    .select()
+    .from(projectEntries)
+    .where(
+      and(
+        eq(projectEntries.organizationId, context.organization.id),
+        isNull(projectEntries.deletedAt),
+        or(ilike(projectEntries.path, like), ilike(projectEntries.searchText, like), ilike(projectEntries.artifactRole, like)),
+      ),
+    )
+    .orderBy(desc(projectEntries.updatedAt));
+
+  const projectsOut = [];
+  for (const project of projectRows) {
+    try {
+      await requireProjectAccess(context, project.id, env);
+      projectsOut.push(project);
+    } catch {
+      // Omit inaccessible matches.
+    }
+  }
+
+  const entriesOut = [];
+  const checkedProjects = new Map<string, boolean>();
+  for (const entry of entryRows) {
+    let allowed = checkedProjects.get(entry.projectId);
+    if (allowed == null) {
+      try {
+        await requireProjectAccess(context, entry.projectId, env);
+        allowed = true;
+      } catch {
+        allowed = false;
+      }
+      checkedProjects.set(entry.projectId, allowed);
+    }
+    if (allowed) entriesOut.push(entry);
+  }
+  return Response.json({ projects: projectsOut, entries: entriesOut });
+}
+
 /**
  * Serve a project's composition as a standalone document for the Studio
  * preview iframe (`Player` directUrl). Generated compositions already embed
@@ -784,7 +1272,7 @@ async function handleListProjectRenders(
   context: AppAuthContext,
   projectId: string,
 ): Promise<Response> {
-  await requireProjectAccess(context, projectId, env);
+  await requireProjectAccess(context, projectId, env, "render");
   const rows = await createDb(env)
     .select()
     .from(renders)
@@ -794,11 +1282,240 @@ async function handleListProjectRenders(
     .orderBy(desc(renders.createdAt));
   const items = rows.map((r) => ({
     id: r.id,
-    url: `/r/${r.r2Key}`,
-    format: r.sourceType,
+    url: r.storageProvider === "bunny-stream" ? `/api/renders/${r.id}` : `/r/${r.r2Key}`,
+    format: r.format || r.sourceType,
+    streamStatus: r.streamStatus,
     createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
   }));
   return Response.json({ renders: items });
+}
+
+async function handleGetProjectShare(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  projectId: string,
+): Promise<Response> {
+  const project = await requireProjectAccess(context, projectId, env);
+  const members = await createDb(env)
+    .select({
+      id: projectMembers.id,
+      userId: projectMembers.userId,
+      role: projectMembers.role,
+      createdAt: projectMembers.createdAt,
+    })
+    .from(projectMembers)
+    .where(eq(projectMembers.projectId, projectId))
+    .orderBy(desc(projectMembers.createdAt));
+  return Response.json({
+    share: {
+      visibility: project.visibility,
+      ownerId: project.ownerId,
+      canManage: project.ownerId === context.user.id || isOrganizationAdmin(context),
+      members,
+    },
+  });
+}
+
+async function handleUpdateProjectShare(
+  env: WorkerEnv,
+  req: Request,
+  context: AppAuthContext,
+  projectId: string,
+): Promise<Response> {
+  const project = await requireProjectAccess(context, projectId, env, "share");
+  const body = await readJson<{ visibility?: string }>(req);
+  const visibility = body.visibility === "organization" ? "organization" : body.visibility === "private" ? "private" : null;
+  if (!visibility) return jsonError("visibility must be private or organization", 400);
+
+  const db = createDb(env);
+  const rows = await db
+    .update(projects)
+    .set({
+      visibility,
+      sharedById: visibility === "organization" ? context.user.id : null,
+      sharedAt: visibility === "organization" ? new Date() : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(projects.id, projectId))
+    .returning();
+  await db.insert(projectPermissionAudits).values({
+    id: crypto.randomUUID(),
+    projectId,
+    organizationId: context.organization.id,
+    actorId: context.user.id,
+    action: "visibility",
+    previousValue: project.visibility,
+    newValue: visibility,
+  });
+  await createProjectSnapshot(env, context, projectId, "share");
+  return Response.json({ project: rows[0] });
+}
+
+async function handleListProjectMembers(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  projectId: string,
+): Promise<Response> {
+  await requireProjectAccess(context, projectId, env);
+  const members = await createDb(env)
+    .select({
+      id: projectMembers.id,
+      userId: projectMembers.userId,
+      role: projectMembers.role,
+      createdAt: projectMembers.createdAt,
+      updatedAt: projectMembers.updatedAt,
+    })
+    .from(projectMembers)
+    .where(eq(projectMembers.projectId, projectId))
+    .orderBy(desc(projectMembers.updatedAt));
+  return Response.json({ members });
+}
+
+async function handleAddProjectMember(
+  env: WorkerEnv,
+  req: Request,
+  context: AppAuthContext,
+  projectId: string,
+): Promise<Response> {
+  await requireProjectAccess(context, projectId, env, "share");
+  const body = await readJson<{ userId?: string; role?: string }>(req);
+  if (!body.userId) return jsonError("userId is required", 400);
+  const role = body.role === "editor" || body.role === "viewer" || body.role === "owner" ? body.role : null;
+  if (!role) return jsonError("role must be owner, editor, or viewer", 400);
+
+  const db = createDb(env);
+  const membership = await db
+    .select({ organizationId: organizationMemberships.organizationId })
+    .from(organizationMemberships)
+    .where(and(eq(organizationMemberships.userId, body.userId), eq(organizationMemberships.organizationId, context.organization.id)))
+    .limit(1);
+  if (!membership[0]) return jsonError("user is not in this organization", 400);
+
+  await db
+    .insert(projectMembers)
+    .values({
+      id: crypto.randomUUID(),
+      projectId,
+      organizationId: context.organization.id,
+      userId: body.userId,
+      role,
+      invitedById: context.user.id,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [projectMembers.projectId, projectMembers.userId],
+      set: { role, invitedById: context.user.id, updatedAt: new Date() },
+    });
+  await db.insert(projectPermissionAudits).values({
+    id: crypto.randomUUID(),
+    projectId,
+    organizationId: context.organization.id,
+    actorId: context.user.id,
+    action: "member-upsert",
+    targetUserId: body.userId,
+    newValue: role,
+  });
+  return Response.json({ ok: true });
+}
+
+async function handleRemoveProjectMember(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  projectId: string,
+  userId: string,
+): Promise<Response> {
+  await requireProjectAccess(context, projectId, env, "share");
+  const db = createDb(env);
+  await db.delete(projectMembers).where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)));
+  await db.insert(projectPermissionAudits).values({
+    id: crypto.randomUUID(),
+    projectId,
+    organizationId: context.organization.id,
+    actorId: context.user.id,
+    action: "member-remove",
+    targetUserId: userId,
+  });
+  return Response.json({ ok: true });
+}
+
+async function handleListProjectVersions(
+  env: WorkerEnv,
+  req: Request,
+  context: AppAuthContext,
+  projectId: string,
+): Promise<Response> {
+  await requireProjectAccess(context, projectId, env);
+  const path = new URL(req.url).searchParams.get("path");
+  const where = path
+    ? and(
+        eq(projectEntryVersions.projectId, projectId),
+        eq(projectEntryVersions.organizationId, context.organization.id),
+        eq(projectEntryVersions.path, normalizeProjectPath(path)),
+      )
+    : and(eq(projectEntryVersions.projectId, projectId), eq(projectEntryVersions.organizationId, context.organization.id));
+  const versions = await createDb(env)
+    .select()
+    .from(projectEntryVersions)
+    .where(where)
+    .orderBy(desc(projectEntryVersions.createdAt));
+  return Response.json({ versions });
+}
+
+async function handleRestoreProjectVersion(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  projectId: string,
+  versionId: string,
+): Promise<Response> {
+  const project = await requireProjectAccess(context, projectId, env, "restore");
+  const version = await createDb(env)
+    .select()
+    .from(projectEntryVersions)
+    .where(and(eq(projectEntryVersions.id, versionId), eq(projectEntryVersions.projectId, projectId)))
+    .limit(1);
+  if (!version[0]) return jsonError("version not found", 404);
+  await restoreEntryVersion(env, context, project, version[0], "restore-version");
+  return Response.json({ ok: true });
+}
+
+async function handleListProjectSnapshots(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  projectId: string,
+): Promise<Response> {
+  await requireProjectAccess(context, projectId, env);
+  const snapshots = await createDb(env)
+    .select()
+    .from(projectSnapshots)
+    .where(and(eq(projectSnapshots.projectId, projectId), eq(projectSnapshots.organizationId, context.organization.id)))
+    .orderBy(desc(projectSnapshots.createdAt));
+  return Response.json({ snapshots });
+}
+
+async function handleRestoreProjectSnapshot(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  projectId: string,
+  snapshotId: string,
+): Promise<Response> {
+  const project = await requireProjectAccess(context, projectId, env, "restore");
+  const snapshots = await createDb(env)
+    .select()
+    .from(projectSnapshots)
+    .where(and(eq(projectSnapshots.id, snapshotId), eq(projectSnapshots.projectId, projectId)))
+    .limit(1);
+  const snapshot = snapshots[0];
+  if (!snapshot) return jsonError("snapshot not found", 404);
+  for (const item of snapshot.manifest ?? []) {
+    const versions = await createDb(env)
+      .select()
+      .from(projectEntryVersions)
+      .where(and(eq(projectEntryVersions.id, item.versionId), eq(projectEntryVersions.projectId, projectId)))
+      .limit(1);
+    if (versions[0]) await restoreEntryVersion(env, context, project, versions[0], "restore-snapshot");
+  }
+  await createProjectSnapshot(env, context, projectId, "restore");
+  return Response.json({ ok: true });
 }
 
 async function handleUpdateProject(
@@ -807,7 +1524,7 @@ async function handleUpdateProject(
   context: AppAuthContext,
   projectId: string,
 ): Promise<Response> {
-  await requireProjectAccess(context, projectId, env);
+  const project = await requireProjectAccess(context, projectId, env, "edit");
   const body = await readJson<{
     title?: string;
     prompt?: string;
@@ -840,6 +1557,7 @@ async function handleUpdateProject(
     });
     // Keep the multi-file index.html in sync with the currentHtml mirror.
     await upsertProjectFile(createDb(env), context.organization.id, projectId, "index.html", body.html);
+    await recordProjectTextEntry(env, context, project, "index.html", body.html, "studio-edit");
   }
 
   return Response.json({ project: rows[0] });
@@ -851,13 +1569,14 @@ async function handlePublishProject(
   context: AppAuthContext,
   projectId: string,
 ): Promise<Response> {
-  const project = await requireProjectAccess(context, projectId, env);
+  const project = await requireProjectAccess(context, projectId, env, "publish");
   const body = await readJson<{
     title?: string;
     description?: string;
     posterKey?: string;
   }>(req);
   if (!project.currentHtml) return jsonError("project has no composition HTML", 400);
+  await createProjectSnapshot(env, context, projectId, "publish");
   const row = await createDb(env)
     .insert(publishedProjects)
     .values({
@@ -931,7 +1650,7 @@ async function upsertGeneratedProject(
 ) {
   const durationSec = normalizedDuration(body.durationSec) ?? 6;
   if (body.projectId) {
-    await requireProjectAccess(context, body.projectId, env);
+    const project = await requireProjectAccess(context, body.projectId, env, "edit");
     const rows = await createDb(env)
       .update(projects)
       .set({
@@ -952,6 +1671,8 @@ async function upsertGeneratedProject(
       html,
     });
     await upsertProjectFile(createDb(env), context.organization.id, body.projectId, "index.html", html);
+    await recordProjectTextEntry(env, context, project, "index.html", html, "generated-html");
+    await createProjectSnapshot(env, context, body.projectId, "generate");
     return rows[0];
   }
   return createProject(env, context, {
@@ -984,8 +1705,17 @@ async function createProject(
       prompt: input.prompt || null,
       currentHtml: input.html || null,
       durationSec: input.durationSec,
+      visibility: "private",
     })
     .returning();
+  await db.insert(projectMembers).values({
+    id: crypto.randomUUID(),
+    projectId,
+    organizationId: context.organization.id,
+    userId: context.user.id,
+    role: "owner",
+    invitedById: context.user.id,
+  });
 
   if (input.html) {
     await db.insert(projectVersions).values({
@@ -998,6 +1728,8 @@ async function createProject(
       html: input.html,
     });
     await upsertProjectFile(db, context.organization.id, projectId, "index.html", input.html);
+    await recordProjectTextEntry(env, context, rows[0], "index.html", input.html, "generated-html");
+    await createProjectSnapshot(env, context, projectId, "generate");
   }
 
   return rows[0];
@@ -1106,6 +1838,37 @@ function slugify(value: string): string {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "") || "organization"
   );
+}
+
+function projectEntryId(projectId: string, path: string): string {
+  return `${projectId}:${path}`;
+}
+
+function artifactRoleForPath(path: string): string {
+  if (/^compositions\//.test(path)) return "composition";
+  if (/^assets\//.test(path)) return "asset";
+  if (/^transcripts?\//.test(path)) return "transcript";
+  if (/^snapshots?\//.test(path)) return "snapshot";
+  if (/^renders?\//.test(path)) return "render";
+  if (/storyboard/i.test(path)) return "storyboard";
+  if (/script/i.test(path)) return "script";
+  return "source";
+}
+
+function mimeForPath(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "html" || ext === "htm") return "text/html; charset=utf-8";
+  if (ext === "css") return "text/css; charset=utf-8";
+  if (ext === "js" || ext === "mjs") return "text/javascript; charset=utf-8";
+  if (ext === "json") return "application/json; charset=utf-8";
+  if (ext === "svg") return "image/svg+xml";
+  if (ext === "png") return "image/png";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "webp") return "image/webp";
+  if (ext === "mp4") return "video/mp4";
+  if (ext === "webm") return "video/webm";
+  if (ext === "mov") return "video/quicktime";
+  return "application/octet-stream";
 }
 
 function seededExamples() {

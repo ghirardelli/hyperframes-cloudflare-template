@@ -16,6 +16,7 @@ export interface StudioRenderItem {
   url: string;
   createdAt?: string;
   format?: string;
+  streamStatus?: string | null;
 }
 
 export interface StudioRenderOptions {
@@ -31,6 +32,35 @@ export interface StudioAssetItem {
   url: string;
   contentType?: string;
   size?: number;
+}
+
+export interface StudioFileEntry {
+  path: string;
+  kind: string;
+  artifactRole?: string;
+  contentType?: string | null;
+  size?: number;
+  updatedAt?: string | Date;
+}
+
+interface StudioShareState {
+  visibility: "private" | "organization";
+  ownerId: string;
+  canManage: boolean;
+  members: Array<{ userId: string; role: string }>;
+}
+
+interface StudioVersionItem {
+  id: string;
+  path: string;
+  changeKind?: string;
+  createdAt?: string;
+  createdById?: string;
+}
+
+interface StudioSearchResponse {
+  projects: Array<{ id: string; title: string }>;
+  entries: StudioFileEntry[];
 }
 
 export interface StudioEditorProps {
@@ -50,6 +80,7 @@ export interface StudioEditorProps {
 
 type Tone = "idle" | "busy" | "ok" | "error";
 type LeftTab = "code" | "compositions" | "assets";
+type RightTab = "properties" | "renders" | "share" | "versions" | "search";
 
 const RESOLUTIONS: Array<{ label: string; width: number; height: number }> = [
   { label: "1920×1080", width: 1920, height: 1080 },
@@ -93,12 +124,17 @@ export default function StudioEditor({
 
   // Multi-file state
   const [files, setFiles] = useState<string[]>([]);
+  const [entries, setEntries] = useState<StudioFileEntry[]>([]);
   const [activeFile, setActiveFile] = useState("index.html");
   const [leftTab, setLeftTab] = useState<LeftTab>("code");
   const [assets, setAssets] = useState<StudioAssetItem[]>([]);
   const [activeCompositionPath, setActiveCompositionPath] = useState<string | null>(null);
+  const [share, setShare] = useState<StudioShareState | null>(null);
+  const [versions, setVersions] = useState<StudioVersionItem[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<StudioSearchResponse>({ projects: [], entries: [] });
 
-  const [rightTab, setRightTab] = useState<"properties" | "renders">("renders");
+  const [rightTab, setRightTab] = useState<RightTab>("renders");
 
   const { iframeRef, togglePlay, seek, onIframeLoad, refreshPlayer } = useTimelinePlayer();
   const currentTime = usePlayerStore((s) => s.currentTime);
@@ -130,12 +166,17 @@ export default function StudioEditor({
   // Load file list + assets in multi-file mode.
   useEffect(() => {
     if (!fileMode) return;
-    api<{ files: string[] }>(`${apiBase}/files`)
-      .then((d) => setFiles(d.files.length ? d.files : ["index.html"]))
+    api<{ files: string[]; entries?: StudioFileEntry[] }>(`${apiBase}/files`)
+      .then((d) => {
+        setFiles(d.files.length ? d.files : ["index.html"]);
+        setEntries(d.entries ?? d.files.map((path) => ({ path, kind: "text" })));
+      })
       .catch((err) => setStatus({ tone: "error", message: messageFromError(err) }));
     api<{ assets: StudioAssetItem[] }>(`${apiBase}/assets`)
       .then((d) => setAssets(d.assets))
       .catch(() => {});
+    void loadShare();
+    void loadVersions("index.html");
   }, [fileMode, apiBase]);
 
   async function loadFile(path: string) {
@@ -148,9 +189,24 @@ export default function StudioEditor({
       setHtml(d.content);
       setDirty(false);
       setActiveCompositionPath(path === "index.html" ? null : path);
+      await loadVersions(path);
     } catch (err) {
       setStatus({ tone: "error", message: messageFromError(err) });
     }
+  }
+
+  async function loadShare() {
+    if (!fileMode) return;
+    const data = await api<{ share: StudioShareState }>(`${apiBase}/share`);
+    setShare(data.share);
+  }
+
+  async function loadVersions(path = activeFile) {
+    if (!fileMode) return;
+    const data = await api<{ versions: StudioVersionItem[] }>(
+      `${apiBase}/versions?path=${encodeURIComponent(path)}`,
+    );
+    setVersions(data.versions);
   }
 
   const handleSourceChange = useCallback((next: string) => {
@@ -170,6 +226,7 @@ export default function StudioEditor({
         });
         // Keep currentHtml mirrored when editing the entry file (used by render).
         if (activeFile === "index.html" && onSave) await onSave(html);
+        await loadVersions(activeFile);
       } else if (onSave) {
         await onSave(html);
       }
@@ -231,6 +288,7 @@ export default function StudioEditor({
         body: JSON.stringify({ path, content: "" }),
       });
       setFiles((prev) => Array.from(new Set([...prev, path])).sort());
+      setEntries((prev) => Array.from(new Map([...prev, { path, kind: "text" }].map((e) => [e.path, e])).values()).sort((a, b) => a.path.localeCompare(b.path)));
       await loadFile(path);
     } catch (err) {
       setStatus({ tone: "error", message: messageFromError(err) });
@@ -242,6 +300,7 @@ export default function StudioEditor({
     try {
       await api(`${apiBase}/files/${encodeURIComponent(path)}`, { method: "DELETE" });
       setFiles((prev) => prev.filter((p) => p !== path));
+      setEntries((prev) => prev.filter((entry) => entry.path !== path));
       if (activeFile === path) await loadFile("index.html");
     } catch (err) {
       setStatus({ tone: "error", message: messageFromError(err) });
@@ -258,7 +317,46 @@ export default function StudioEditor({
         { method: "POST", headers: { "content-type": file.type || "application/octet-stream" }, body: file },
       );
       setAssets((prev) => [item, ...prev.filter((a) => a.path !== item.path)]);
+      setEntries((prev) =>
+        Array.from(new Map([...prev, { path: item.path, kind: "binary", artifactRole: "asset", contentType: item.contentType, size: item.size }].map((e) => [e.path, e])).values()).sort((a, b) => a.path.localeCompare(b.path)),
+      );
       setStatus({ tone: "ok", message: `Uploaded ${file.name}` });
+    } catch (err) {
+      setStatus({ tone: "error", message: messageFromError(err) });
+    }
+  }
+
+  async function updateShareVisibility(visibility: "private" | "organization") {
+    if (!fileMode || !share?.canManage) return;
+    try {
+      const data = await api<{ project: { visibility: "private" | "organization" } }>(`${apiBase}/share`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ visibility }),
+      });
+      setShare((prev) => (prev ? { ...prev, visibility: data.project.visibility } : prev));
+      setStatus({ tone: "ok", message: visibility === "organization" ? "Shared with organization." : "Project is private." });
+    } catch (err) {
+      setStatus({ tone: "error", message: messageFromError(err) });
+    }
+  }
+
+  async function restoreVersion(versionId: string) {
+    if (!fileMode) return;
+    try {
+      await api(`${apiBase}/versions/${encodeURIComponent(versionId)}/restore`, { method: "POST" });
+      await loadFile(activeFile);
+      setStatus({ tone: "ok", message: "Version restored." });
+    } catch (err) {
+      setStatus({ tone: "error", message: messageFromError(err) });
+    }
+  }
+
+  async function searchProject() {
+    if (!fileMode || searchQuery.trim().length < 2) return;
+    try {
+      const data = await api<StudioSearchResponse>(`/api/projects/search?q=${encodeURIComponent(searchQuery.trim())}`);
+      setSearchResults(data);
     } catch (err) {
       setStatus({ tone: "error", message: messageFromError(err) });
     }
@@ -450,7 +548,7 @@ export default function StudioEditor({
         {/* Right */}
         <aside className="flex min-h-0 flex-col border-l border-neutral-800">
           <div className="flex flex-shrink-0 border-b border-neutral-800 text-[11px] uppercase tracking-wide">
-            {(["properties", "renders"] as const).map((tab) => (
+            {(["properties", "renders", "share", "versions", "search"] as const).map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -470,17 +568,35 @@ export default function StudioEditor({
                   Click <span className="text-neutral-300">Select</span>, then pick an element on the canvas to edit its properties.
                 </p>
               )
-            ) : renders.length === 0 ? (
+            ) : rightTab === "renders" ? (
+              renders.length === 0 ? (
               <p className="text-xs text-neutral-600">No renders yet</p>
-            ) : (
+              ) : (
               <div className="space-y-2">
                 {renders.map((r) => (
                   <a key={r.id} href={r.url} target="_blank" rel="noreferrer" className="block rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs hover:border-neutral-700">
                     <span className="font-medium uppercase text-neutral-300">{r.format || "mp4"}</span>
+                    {r.streamStatus ? <span className="ml-2 text-neutral-500">{r.streamStatus}</span> : null}
                     {r.createdAt ? <span className="ml-2 text-neutral-500">{new Date(r.createdAt).toLocaleString()}</span> : null}
                   </a>
                 ))}
               </div>
+              )
+            ) : rightTab === "share" ? (
+              <SharePanel share={share} onSetVisibility={(v) => void updateShareVisibility(v)} />
+            ) : rightTab === "versions" ? (
+              <VersionsPanel versions={versions} onRestore={(id) => void restoreVersion(id)} />
+            ) : (
+              <SearchPanel
+                query={searchQuery}
+                setQuery={setSearchQuery}
+                results={searchResults}
+                onSearch={() => void searchProject()}
+                onOpenEntry={(path) => {
+                  setLeftTab("code");
+                  void loadFile(path);
+                }}
+              />
             )}
           </div>
         </aside>
@@ -489,6 +605,110 @@ export default function StudioEditor({
       <footer className="flex-shrink-0 border-t border-neutral-800 px-4 py-1.5 text-xs">
         <span className={statusClass(status.tone)}>{status.message || "Ready"}</span>
       </footer>
+    </div>
+  );
+}
+
+function SharePanel({
+  share,
+  onSetVisibility,
+}: {
+  share: StudioShareState | null;
+  onSetVisibility: (visibility: "private" | "organization") => void;
+}) {
+  if (!share) return <p className="text-xs text-neutral-600">Share state unavailable</p>;
+  return (
+    <div className="space-y-3 text-xs">
+      <div className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2">
+        <p className="text-neutral-500">Visibility</p>
+        <p className="mt-1 font-medium text-neutral-200">{share.visibility === "organization" ? "Organization" : "Private"}</p>
+      </div>
+      <div className="flex gap-2">
+        <button type="button" disabled={!share.canManage || share.visibility === "private"} onClick={() => onSetVisibility("private")} className="rounded-md border border-neutral-700 px-2 py-1 text-neutral-200 disabled:opacity-40">
+          Private
+        </button>
+        <button type="button" disabled={!share.canManage || share.visibility === "organization"} onClick={() => onSetVisibility("organization")} className="rounded-md border border-neutral-700 px-2 py-1 text-neutral-200 disabled:opacity-40">
+          Organization
+        </button>
+      </div>
+      <div className="space-y-1">
+        <p className="text-neutral-500">Members</p>
+        {share.members.length === 0 ? (
+          <p className="text-neutral-600">No explicit members</p>
+        ) : (
+          share.members.map((m) => (
+            <div key={m.userId} className="flex justify-between rounded border border-neutral-800 px-2 py-1">
+              <span className="truncate text-neutral-300">{m.userId}</span>
+              <span className="text-neutral-500">{m.role}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function VersionsPanel({
+  versions,
+  onRestore,
+}: {
+  versions: StudioVersionItem[];
+  onRestore: (versionId: string) => void;
+}) {
+  if (versions.length === 0) return <p className="text-xs text-neutral-600">No versions yet</p>;
+  return (
+    <div className="space-y-2 text-xs">
+      {versions.map((v) => (
+        <div key={v.id} className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate font-medium text-neutral-300">{v.path}</p>
+              <p className="text-neutral-500">{v.changeKind || "save"}{v.createdAt ? ` · ${new Date(v.createdAt).toLocaleString()}` : ""}</p>
+            </div>
+            <button type="button" onClick={() => onRestore(v.id)} className="rounded border border-neutral-700 px-2 py-1 text-neutral-300 hover:border-neutral-500">
+              Restore
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SearchPanel({
+  query,
+  setQuery,
+  results,
+  onSearch,
+  onOpenEntry,
+}: {
+  query: string;
+  setQuery: (value: string) => void;
+  results: StudioSearchResponse;
+  onSearch: () => void;
+  onOpenEntry: (path: string) => void;
+}) {
+  return (
+    <div className="space-y-3 text-xs">
+      <div className="flex gap-2">
+        <input value={query} onChange={(e) => setQuery(e.target.value)} className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-100" />
+        <button type="button" onClick={onSearch} className="rounded-md border border-neutral-700 px-2 py-1 text-neutral-200">
+          Search
+        </button>
+      </div>
+      <div className="space-y-1">
+        {results.entries.map((entry) => (
+          <button key={entry.path} type="button" onClick={() => onOpenEntry(entry.path)} className="block w-full rounded border border-neutral-800 px-2 py-1 text-left text-neutral-300 hover:border-neutral-600">
+            <span className="block truncate">{entry.path}</span>
+            <span className="text-neutral-500">{entry.artifactRole || entry.kind}</span>
+          </button>
+        ))}
+        {results.projects.map((project) => (
+          <div key={project.id} className="rounded border border-neutral-800 px-2 py-1 text-neutral-300">
+            {project.title}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

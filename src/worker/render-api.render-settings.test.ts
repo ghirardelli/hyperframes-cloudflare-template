@@ -78,6 +78,7 @@ function renderRequest(body: Record<string, unknown>) {
 
 describe("render settings passthrough", () => {
   beforeEach(() => {
+    vi.unstubAllGlobals();
     mocks.requireAuthContext.mockReset();
     mocks.requireAuthContext.mockResolvedValue(memberContext);
     mocks.containerBodies = [];
@@ -138,5 +139,37 @@ describe("render settings passthrough", () => {
 
     expect(response?.status).toBe(400);
     expect(mocks.containerBodies).toHaveLength(0);
+  });
+
+  it("uploads completed renders to Bunny Stream when configured", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ guid: "stream-video-1", status: 0 })))
+      .mockResolvedValueOnce(new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleWorkerApi(
+      renderRequest({ html: "<html></html>", format: "mp4" }),
+      {
+        ...env,
+        BUNNY_STREAM_LIBRARY_ID: "123",
+        BUNNY_STREAM_ACCESS_KEY: "stream-secret",
+        BUNNY_STREAM_API_BASE: "https://video.bunnycdn.com",
+      },
+    );
+
+    expect(response?.status).toBe(200);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://video.bunnycdn.com/library/123/videos");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://video.bunnycdn.com/library/123/videos/stream-video-1");
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.inserts[0]).toMatchObject({
+      storageProvider: "bunny-stream",
+      streamVideoId: "stream-video-1",
+      r2Key: null,
+    });
+    await expect(response?.json()).resolves.toMatchObject({
+      url: expect.stringContaining("/api/renders/"),
+      streamStatus: "0",
+    });
   });
 });

@@ -276,6 +276,81 @@ describe("tenant-aware worker APIs", () => {
     await expect(response?.json()).resolves.toEqual({ error: "organization access denied" });
   });
 
+  it("denies private same-organization project access to non-members", async () => {
+    apiMocks.requireAuthContext.mockResolvedValue(memberContext);
+    apiMocks.selectRows = [[{ id: "project-2", organizationId: "org-1", ownerId: "other-user", visibility: "private" }], []];
+
+    const response = await handleWorkerApi(
+      new Request("https://motion-frames.test/api/projects/project-2"),
+      baseEnv,
+    );
+
+    expect(response?.status).toBe(403);
+    await expect(response?.json()).resolves.toEqual({ error: "project access denied" });
+  });
+
+  it("allows organization-shared project access inside the organization", async () => {
+    apiMocks.requireAuthContext.mockResolvedValue(memberContext);
+    apiMocks.selectRows = [[{ id: "project-2", organizationId: "org-1", ownerId: "other-user", visibility: "organization" }]];
+
+    const response = await handleWorkerApi(
+      new Request("https://motion-frames.test/api/projects/project-2"),
+      baseEnv,
+    );
+
+    expect(response?.status).toBe(200);
+  });
+
+  it("creates projects as private and records owner membership", async () => {
+    apiMocks.requireAuthContext.mockResolvedValue(memberContext);
+    apiMocks.returningRows = [[{ id: "project-new", organizationId: "org-1", ownerId: "user-1", visibility: "private" }]];
+
+    const response = await handleWorkerApi(
+      new Request("https://motion-frames.test/api/projects", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "Private draft" }),
+      }),
+      baseEnv,
+    );
+
+    expect(response?.status).toBe(201);
+    expect(apiMocks.inserts[0]?.values).toMatchObject({ visibility: "private", ownerId: "user-1" });
+    expect(apiMocks.inserts[1]?.values).toMatchObject({
+      projectId: apiMocks.inserts[0]?.values.id,
+      userId: "user-1",
+      role: "owner",
+    });
+  });
+
+  it("lets a project owner share with the organization and records an audit row", async () => {
+    apiMocks.requireAuthContext.mockResolvedValue(memberContext);
+    apiMocks.selectRows = [[{ id: "project-1", organizationId: "org-1", ownerId: "user-1", visibility: "private" }]];
+    apiMocks.returningRows = [[{ id: "project-1", visibility: "organization" }]];
+
+    const response = await handleWorkerApi(
+      new Request("https://motion-frames.test/api/projects/project-1/share", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ visibility: "organization" }),
+      }),
+      baseEnv,
+    );
+
+    expect(response?.status).toBe(200);
+    expect(apiMocks.updates[0]?.values).toMatchObject({ visibility: "organization" });
+    expect(apiMocks.inserts).toContainEqual(
+      expect.objectContaining({
+        values: expect.objectContaining({
+          projectId: "project-1",
+          action: "visibility",
+          previousValue: "private",
+          newValue: "organization",
+        }),
+      }),
+    );
+  });
+
   it("serves a project preview to a same-organization member", async () => {
     apiMocks.requireAuthContext.mockResolvedValue(memberContext);
     apiMocks.selectRows = [
@@ -297,7 +372,7 @@ describe("tenant-aware worker APIs", () => {
   it("persists Studio source edits and records a version", async () => {
     apiMocks.requireAuthContext.mockResolvedValue(memberContext);
     // requireProjectAccess lookup, then update().returning()
-    apiMocks.selectRows = [[{ id: "project-1", organizationId: "org-1" }]];
+    apiMocks.selectRows = [[{ id: "project-1", organizationId: "org-1", ownerId: "user-1", visibility: "private" }]];
     apiMocks.returningRows = [[{ id: "project-1", currentHtml: "<h1>edited</h1>" }]];
 
     const response = await handleWorkerApi(

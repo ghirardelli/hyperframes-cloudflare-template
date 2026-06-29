@@ -29,6 +29,13 @@
       "when": 1782714902842,
       "tag": "0003_aromatic_magneto",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782772394563,
+      "tag": "0004_bright_mandarin",
+      "breakpoints": true
     }
   ]
 }
