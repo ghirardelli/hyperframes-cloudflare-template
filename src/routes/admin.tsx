@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Lock, Unlock, UserPlus } from "lucide-react";
 
+import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -94,19 +95,21 @@ function AdminPage() {
 
   if (!canAdmin) {
     return (
-      <main className="min-h-dvh bg-background px-4 py-10 text-foreground sm:px-6 lg:px-8">
-        <div className="mx-auto w-full max-w-3xl">
-          <TopLinks />
-          <p className="mt-16 text-2xl font-semibold">{status || "Checking access..."}</p>
-        </div>
-      </main>
+      <div className="flex min-h-dvh flex-col bg-background text-foreground">
+        <AppHeader active="admin" />
+        <main className="w-full px-4 py-10 sm:px-6 lg:px-8">
+          <div className="mx-auto w-full max-w-3xl">
+            <p className="mt-4 text-2xl font-semibold">{status || "Checking access..."}</p>
+          </div>
+        </main>
+      </div>
     );
   }
 
   return (
-    <main className="min-h-dvh bg-background px-4 py-10 text-foreground sm:px-6 lg:px-8">
-      <div className="w-full space-y-8">
-        <TopLinks />
+    <div className="flex min-h-dvh flex-col bg-background text-foreground">
+      <AppHeader active="admin" />
+      <main className="w-full space-y-8 px-4 py-10 sm:px-6 lg:px-8">
         <header>
           <p className="text-sm text-muted-foreground">Admin</p>
           <h1 className="mt-2 text-4xl font-semibold">Users and organizations</h1>
@@ -186,8 +189,8 @@ function AdminPage() {
             ))}
           </section>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
 
@@ -210,21 +213,6 @@ function Field({
   );
 }
 
-function TopLinks() {
-  return (
-    <nav className="flex flex-wrap gap-2 text-sm">
-      <Button asChild variant="secondary" size="sm">
-        <a href="/">Workspace</a>
-      </Button>
-      <Button asChild variant="ghost" size="sm">
-        <a href="/playground">Playground</a>
-      </Button>
-      <Button asChild variant="ghost" size="sm">
-        <a href="/profile">Profile</a>
-      </Button>
-    </nav>
-  );
-}
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);

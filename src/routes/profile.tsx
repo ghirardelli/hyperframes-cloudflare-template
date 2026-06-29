@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -65,20 +66,14 @@ function ProfilePage() {
   }
 
   return (
-    <main className="min-h-dvh bg-background px-4 py-10 text-foreground sm:px-6 lg:px-8">
-      <div className="mx-auto w-full max-w-6xl space-y-8">
-        <nav className="flex flex-wrap gap-2 text-sm">
-          <Button asChild variant="secondary" size="sm">
-            <a href="/">Workspace</a>
-          </Button>
-          <Button asChild variant="ghost" size="sm">
-            <a href="/playground">Playground</a>
-          </Button>
-        </nav>
-        <header>
-          <p className="text-sm text-muted-foreground">Profile</p>
-          <h1 className="mt-2 text-4xl font-semibold">Account settings</h1>
-        </header>
+    <div className="flex min-h-dvh flex-col bg-background text-foreground">
+      <AppHeader active="profile" />
+      <main className="w-full px-4 py-10 sm:px-6 lg:px-8">
+        <div className="mx-auto w-full max-w-6xl space-y-8">
+          <header>
+            <p className="text-sm text-muted-foreground">Profile</p>
+            <h1 className="mt-2 text-4xl font-semibold">Account settings</h1>
+          </header>
 
         <div className="grid gap-6 md:grid-cols-2">
           <Card>
@@ -119,9 +114,10 @@ function ProfilePage() {
             </CardContent>
           </Card>
         </div>
-        {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
-      </div>
-    </main>
+          {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
+        </div>
+      </main>
+    </div>
   );
 }
 
