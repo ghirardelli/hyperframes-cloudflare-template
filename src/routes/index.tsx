@@ -231,7 +231,7 @@ function MotionFramesHome() {
 
   if (!me) {
     return (
-      <main className="grid min-h-screen place-items-center bg-stone-50 px-6 text-stone-950">
+      <main className="grid min-h-dvh place-items-center bg-stone-50 px-6 text-stone-950">
         <div className="text-center">
           <Film className="mx-auto h-8 w-8 text-[#0066cc]" aria-hidden="true" />
           <p className="mt-4 text-lg font-medium">Opening Motion Frames...</p>
@@ -241,9 +241,9 @@ function MotionFramesHome() {
   }
 
   return (
-    <main className="min-h-screen bg-stone-50 text-stone-950">
-      <section className="mx-auto grid min-h-screen w-full max-w-7xl grid-cols-1 gap-6 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8">
-        <div className="flex min-h-[calc(100vh-2rem)] flex-col gap-4">
+    <main className="min-h-dvh bg-stone-50 text-stone-950">
+      <section className="grid min-h-dvh w-full grid-cols-1 gap-6 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_400px] lg:px-8">
+        <div className="flex min-h-[calc(100dvh-2rem)] flex-col gap-4">
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 pb-4">
             <div>
               <div className="flex items-center gap-2 text-sm font-medium text-[#0066cc]">
@@ -302,7 +302,7 @@ function MotionFramesHome() {
           </div>
         </div>
 
-        <aside className="flex min-h-[calc(100vh-2rem)] flex-col gap-4">
+        <aside className="flex min-h-[calc(100dvh-2rem)] flex-col gap-4">
           <Card>
             <CardHeader>
               <CardTitle>Generate</CardTitle>

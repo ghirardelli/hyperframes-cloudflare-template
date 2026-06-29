@@ -65,8 +65,8 @@ function ProfilePage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f5f7] px-6 py-10 text-[#1d1d1f]">
-      <div className="mx-auto max-w-5xl space-y-8">
+    <main className="min-h-dvh bg-[#f5f5f7] px-4 py-10 text-[#1d1d1f] sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-6xl space-y-8">
         <nav className="flex flex-wrap gap-2 text-sm">
           <Button asChild variant="secondary" size="sm">
             <a href="/">Workspace</a>

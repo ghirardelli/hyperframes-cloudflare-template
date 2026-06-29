@@ -72,6 +72,18 @@ describe("protected worker APIs", () => {
     await expect(response?.json()).resolves.toEqual({ error: "authentication required" });
   });
 
+  it("rejects unauthenticated project preview requests", async () => {
+    mocks.requireAuthContext.mockRejectedValue(new AuthRequiredError());
+
+    const response = await handleWorkerApi(
+      new Request("https://motion-frames.test/api/projects/project-1/preview"),
+      env,
+    );
+
+    expect(response?.status).toBe(401);
+    await expect(response?.json()).resolves.toEqual({ error: "authentication required" });
+  });
+
   it("rejects locked users on protected APIs", async () => {
     mocks.requireAuthContext.mockRejectedValue(new ForbiddenError("account locked"));
 
