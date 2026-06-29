@@ -58,7 +58,8 @@ function AdminPage() {
 
   async function createUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     setStatus("");
     const organizationMode = String(form.get("organizationMode"));
     try {
@@ -76,7 +77,7 @@ function AdminPage() {
             organizationMode === "new" ? String(form.get("organizationName")) : undefined,
         }),
       });
-      event.currentTarget.reset();
+      formElement.reset();
       setStatus("User created.");
       await refresh();
     } catch (err) {

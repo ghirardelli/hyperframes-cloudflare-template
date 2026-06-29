@@ -48,7 +48,8 @@ function ProfilePage() {
 
   async function changePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     try {
       await fetchJson("/api/profile/password", {
         method: "POST",
@@ -58,7 +59,7 @@ function ProfilePage() {
           newPassword: String(form.get("newPassword")),
         }),
       });
-      event.currentTarget.reset();
+      formElement.reset();
       setStatus("Password changed.");
     } catch (err) {
       setStatus(messageFromError(err));
