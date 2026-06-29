@@ -69,6 +69,8 @@ vi.mock("../db", () => ({
         apiMocks.inserts.push({ values });
         return {
           returning: vi.fn(() => nextReturningRows(values)),
+          onConflictDoUpdate: vi.fn(() => Promise.resolve()),
+          onConflictDoNothing: vi.fn(() => Promise.resolve()),
         };
       }),
     })),

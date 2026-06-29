@@ -245,6 +245,22 @@ async function upsertFile(
   content: string,
 ): Promise<Response> {
   if (content.length > MAX_FILE_BYTES) return jsonError("file too large", 413);
+  await upsertProjectFile(db, orgId, projectId, path, content);
+  return Response.json({ path });
+}
+
+/**
+ * Upsert a single source file (DB only, no HTTP). Used by the file API and by
+ * the generate/save paths to keep the index.html file in sync with the
+ * project's currentHtml mirror.
+ */
+export async function upsertProjectFile(
+  db: ReturnType<typeof createDb>,
+  orgId: string,
+  projectId: string,
+  path: string,
+  content: string,
+): Promise<void> {
   await db
     .insert(projectFiles)
     .values({
@@ -259,7 +275,6 @@ async function upsertFile(
       target: [projectFiles.projectId, projectFiles.path],
       set: { content, updatedAt: new Date() },
     });
-  return Response.json({ path });
 }
 
 async function serveAsset(

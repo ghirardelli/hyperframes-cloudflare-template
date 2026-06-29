@@ -26,7 +26,7 @@ import {
   type TenantAuthEnv,
 } from "../lib/auth-context";
 import { DEFAULT_MODEL, generateComposition, GenerateError } from "../lib/generate";
-import { handleStudioFilesApi, renderProjectPreview } from "./studio-files-api";
+import { handleStudioFilesApi, renderProjectPreview, upsertProjectFile } from "./studio-files-api";
 
 export interface WorkerEnv extends TenantAuthEnv {
   ASSETS: Fetcher;
@@ -797,6 +797,8 @@ async function handleUpdateProject(
       prompt: body.prompt,
       html: body.html,
     });
+    // Keep the multi-file index.html in sync with the currentHtml mirror.
+    await upsertProjectFile(createDb(env), context.organization.id, projectId, "index.html", body.html);
   }
 
   return Response.json({ project: rows[0] });
@@ -908,6 +910,7 @@ async function upsertGeneratedProject(
       prompt: body.prompt,
       html,
     });
+    await upsertProjectFile(createDb(env), context.organization.id, body.projectId, "index.html", html);
     return rows[0];
   }
   return createProject(env, context, {
@@ -953,6 +956,7 @@ async function createProject(
       prompt: input.prompt || null,
       html: input.html,
     });
+    await upsertProjectFile(db, context.organization.id, projectId, "index.html", input.html);
   }
 
   return rows[0];

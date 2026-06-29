@@ -98,6 +98,7 @@ function StudioPage() {
     <Suspense fallback={<Loading message="Loading Studio…" />}>
       <StudioEditor
         projectId={projectId}
+        multiFile
         title={project.title || "Project"}
         initialHtml={project.currentHtml || ""}
         renders={renders}
