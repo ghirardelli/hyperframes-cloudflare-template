@@ -3,7 +3,6 @@ import { useChat } from "@tanstack/ai-react";
 import { clientTools, fetchServerSentEvents } from "@tanstack/ai-client";
 import type { UIMessage } from "@tanstack/ai-client";
 import {
-  Bot,
   Check,
   Loader2,
   MessageCircle,
@@ -16,13 +15,6 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
@@ -41,6 +33,8 @@ import {
 interface PromptAgentPanelProps {
   prompt: string;
   onPromptChange: (prompt: string) => void;
+  durationSec: number;
+  onDurationChange: (durationSec: number) => void;
   aiEnabled: boolean;
   isConfigReady: boolean;
   modelLabel: string;
@@ -66,6 +60,8 @@ type PromptAgentPartialResult = {
 export function PromptAgentPanel({
   prompt,
   onPromptChange,
+  durationSec,
+  onDurationChange,
   aiEnabled,
   isConfigReady,
   modelLabel,
@@ -83,6 +79,7 @@ export function PromptAgentPanel({
   const forwardedPropsRef = useRef({
     projectId: activeProjectId || undefined,
     currentPrompt: prompt,
+    durationSec,
     activeProjectTitle: activeProjectTitle || undefined,
   });
 
@@ -90,9 +87,10 @@ export function PromptAgentPanel({
     forwardedPropsRef.current = {
       projectId: activeProjectId || undefined,
       currentPrompt: prompt,
+      durationSec,
       activeProjectTitle: activeProjectTitle || undefined,
     };
-  }, [activeProjectId, activeProjectTitle, prompt]);
+  }, [activeProjectId, activeProjectTitle, durationSec, prompt]);
 
   const connection = useMemo(
     () =>
@@ -107,6 +105,7 @@ export function PromptAgentPanel({
       clientTools(
         setDraftPromptTool.client(async (args) => {
           onPromptChange(args.generationPrompt);
+          onDurationChange(args.durationSec);
           setFocusedSection("draft");
           return { applied: true, prompt: args.generationPrompt };
         }),
@@ -115,7 +114,7 @@ export function PromptAgentPanel({
           return { highlighted: true, section: args.section };
         }),
       ),
-    [onPromptChange],
+    [onDurationChange, onPromptChange],
   );
 
   const {
@@ -161,6 +160,9 @@ export function PromptAgentPanel({
   function applyPromptPackage() {
     if (!promptPackage?.generationPrompt?.trim()) return;
     onPromptChange(promptPackage.generationPrompt);
+    if (typeof promptPackage.durationSec === "number") {
+      onDurationChange(promptPackage.durationSec);
+    }
     setFocusedSection("draft");
   }
 
@@ -170,160 +172,164 @@ export function PromptAgentPanel({
   }
 
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <Bot className="h-4 w-4" aria-hidden="true" />
-              Prompt Agent
-            </CardTitle>
-            <CardDescription>{modelLabel || "OpenRouter"}</CardDescription>
-          </div>
-          <Badge variant={canUseAgent ? "default" : "secondary"}>
-            {canUseAgent ? "Ready" : "Offline"}
-          </Badge>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-hairline bg-background px-3 py-2">
+        <div>
+          <div className="text-sm font-medium text-foreground">AI prompt agent</div>
+          <div className="text-xs text-muted-foreground">{modelLabel || "OpenRouter"}</div>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div
-          className={cn(
-            "max-h-[280px] space-y-3 overflow-y-auto rounded-lg border border-hairline bg-background p-3",
-            focusedSection === "chat" && "ring-2 ring-primary/30",
-          )}
-        >
-          {messages.length ? (
-            messages.map((message) => (
-              <AgentMessage
-                key={message.id}
-                message={message}
-                onApprove={(id) => addToolApprovalResponse({ id, approved: true })}
-                onDeny={(id) => addToolApprovalResponse({ id, approved: false })}
-              />
-            ))
-          ) : (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <MessageCircle className="h-4 w-4" aria-hidden="true" />
-              <span>Start with an idea, style, product, or scene.</span>
-            </div>
-          )}
-          {isLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              <span>Thinking...</span>
-            </div>
-          ) : null}
-        </div>
+        <Badge variant={canUseAgent ? "default" : "secondary"}>
+          {canUseAgent ? "Ready" : "Offline"}
+        </Badge>
+      </div>
 
-        <div
-          className={cn(
-            "rounded-lg border border-hairline bg-surface-card p-3",
-            focusedSection === "draft" && "ring-2 ring-primary/30",
-          )}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-sm font-medium text-foreground">
-              {promptPackage?.title || "Draft prompt"}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={applyPromptPackage}
-              disabled={!hasPackagePrompt}
-            >
-              <WandSparkles className="h-4 w-4" aria-hidden="true" />
-              Apply
-            </Button>
+      <div
+        className={cn(
+          "max-h-[280px] space-y-3 overflow-y-auto rounded-lg border border-hairline bg-background p-3",
+          focusedSection === "chat" && "ring-2 ring-primary/30",
+        )}
+      >
+        {messages.length ? (
+          messages.map((message) => (
+            <AgentMessage
+              key={message.id}
+              message={message}
+              onApprove={(id) => addToolApprovalResponse({ id, approved: true })}
+              onDeny={(id) => addToolApprovalResponse({ id, approved: false })}
+            />
+          ))
+        ) : (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <MessageCircle className="h-4 w-4" aria-hidden="true" />
+            <span>Ask for help turning a rough idea into a generation-ready prompt.</span>
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {promptPackage?.assistantMessage ||
-              "The agent's structured prompt package will appear here."}
-          </p>
-          {promptPackage?.generationPrompt ? (
-            <div className="mt-3 rounded-md border border-hairline bg-white p-3 text-sm text-body">
-              {promptPackage.generationPrompt}
-            </div>
-          ) : null}
-          {promptPackage?.hyperframesChecklist?.length ? (
-            <div
-              className={cn(
-                "mt-3 space-y-1",
-                focusedSection === "checklist" && "rounded-md ring-2 ring-primary/30",
-              )}
-            >
-              {promptPackage.hyperframesChecklist.slice(0, 5).map((item, index) => (
-                <div
-                  key={`${item.label ?? "check"}-${index}`}
-                  className="flex items-start gap-2 text-xs text-muted-foreground"
-                >
-                  <Check
-                    className={cn(
-                      "mt-0.5 h-3.5 w-3.5 shrink-0",
-                      item.satisfied ? "text-emerald-600" : "text-muted-foreground",
-                    )}
-                    aria-hidden="true"
-                  />
-                  <span>{item.label || item.notes || "HyperFrames check"}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
-
-        {error ? (
-          <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900">
-            {error.message}
+        )}
+        {isLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            <span>Thinking...</span>
           </div>
         ) : null}
+      </div>
 
-        <div className="space-y-2">
-          <Textarea
-            value={agentInput}
-            onChange={(event) => setAgentInput(event.target.value)}
-            rows={3}
-            placeholder="Describe the motion, mood, or problem to solve"
-            disabled={!canUseAgent || isLoading}
-            onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                event.preventDefault();
-                void submitAgentMessage();
-              }
-            }}
-          />
-          <div className="grid grid-cols-3 gap-2">
-            <Button
-              type="button"
-              className="col-span-2"
-              onClick={submitAgentMessage}
-              disabled={!canUseAgent || isLoading || !agentInput.trim()}
-            >
-              {isLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Send className="h-4 w-4" aria-hidden="true" />
-              )}
-              Send
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={isLoading ? stop : error ? reload : clearConversation}
-              disabled={!messages.length && !isLoading && !error}
-            >
-              {isLoading ? (
-                <Square className="h-4 w-4" aria-hidden="true" />
-              ) : error ? (
-                <RotateCcw className="h-4 w-4" aria-hidden="true" />
-              ) : (
-                <X className="h-4 w-4" aria-hidden="true" />
-              )}
-              {isLoading ? "Stop" : error ? "Retry" : "Clear"}
-            </Button>
+      <div
+        className={cn(
+          "rounded-lg border border-hairline bg-surface-card p-3",
+          focusedSection === "draft" && "ring-2 ring-primary/30",
+        )}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium text-foreground">
+              {promptPackage?.title || "Suggested prompt"}
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {promptPackage?.durationSec
+                ? `${promptPackage.durationSec}s duration`
+                : `${durationSec}s selected duration`}
+            </div>
           </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={applyPromptPackage}
+            disabled={!hasPackagePrompt}
+          >
+            <WandSparkles className="h-4 w-4" aria-hidden="true" />
+            Apply
+          </Button>
         </div>
-      </CardContent>
-    </Card>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {promptPackage?.assistantMessage ||
+            "The agent's structured prompt package will appear here."}
+        </p>
+        {promptPackage?.generationPrompt ? (
+          <div className="mt-3 rounded-md border border-hairline bg-white p-3 text-sm text-body">
+            {promptPackage.generationPrompt}
+          </div>
+        ) : null}
+        {promptPackage?.hyperframesChecklist?.length ? (
+          <div
+            className={cn(
+              "mt-3 space-y-1",
+              focusedSection === "checklist" && "rounded-md ring-2 ring-primary/30",
+            )}
+          >
+            {promptPackage.hyperframesChecklist.slice(0, 5).map((item, index) => (
+              <div
+                key={`${item.label ?? "check"}-${index}`}
+                className="flex items-start gap-2 text-xs text-muted-foreground"
+              >
+                <Check
+                  className={cn(
+                    "mt-0.5 h-3.5 w-3.5 shrink-0",
+                    item.satisfied ? "text-emerald-600" : "text-muted-foreground",
+                  )}
+                  aria-hidden="true"
+                />
+                <span>{item.label || item.notes || "HyperFrames check"}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      {error ? (
+        <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+          {error.message}
+        </div>
+      ) : null}
+
+      <div className="space-y-2">
+        <div className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+          Ask the agent
+        </div>
+        <Textarea
+          value={agentInput}
+          onChange={(event) => setAgentInput(event.target.value)}
+          rows={3}
+          placeholder="Describe the motion, mood, product, or problem to solve"
+          disabled={!canUseAgent || isLoading}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+              event.preventDefault();
+              void submitAgentMessage();
+            }
+          }}
+        />
+        <div className="grid grid-cols-3 gap-2">
+          <Button
+            type="button"
+            className="col-span-2"
+            onClick={submitAgentMessage}
+            disabled={!canUseAgent || isLoading || !agentInput.trim()}
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Send className="h-4 w-4" aria-hidden="true" />
+            )}
+            Send
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={isLoading ? stop : error ? reload : clearConversation}
+            disabled={!messages.length && !isLoading && !error}
+          >
+            {isLoading ? (
+              <Square className="h-4 w-4" aria-hidden="true" />
+            ) : error ? (
+              <RotateCcw className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <X className="h-4 w-4" aria-hidden="true" />
+            )}
+            {isLoading ? "Stop" : error ? "Retry" : "Clear"}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 

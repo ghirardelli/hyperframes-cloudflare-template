@@ -203,6 +203,11 @@ interface RenderSettings {
 }
 
 const RENDER_FORMATS = new Set(["mp4", "webm", "mov"]);
+const RENDER_CONTENT_TYPES: Record<string, string> = {
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
+};
 
 /**
  * Validate optional render settings from the request body. Returns a settings
@@ -280,6 +285,7 @@ async function handleRender(
 
   const settings = parseRenderSettings(body);
   if (settings instanceof Response) return settings;
+  const renderFormat = settings.format ?? "mp4";
 
   const container = getContainer(env.RENDER_CONTAINER, "renderer");
   let containerRes;
@@ -300,9 +306,9 @@ async function handleRender(
     return jsonError(`render failed (${containerRes.status}): ${errBody}`, 502);
   }
 
-  const key = `renders/${context.organization.id}/${Date.now()}-${crypto.randomUUID()}.mp4`;
+  const key = `renders/${context.organization.id}/${Date.now()}-${crypto.randomUUID()}.${renderFormat}`;
   await env.RENDERS.put(key, containerRes.body, {
-    httpMetadata: { contentType: "video/mp4" },
+    httpMetadata: { contentType: RENDER_CONTENT_TYPES[renderFormat] ?? "video/mp4" },
   });
 
   await createDb(env).insert(renders).values({
@@ -322,6 +328,7 @@ async function handleRender(
     url: url.toString(),
     key,
     source,
+    format: renderFormat,
     durationMs: Date.now() - t0,
   });
 }

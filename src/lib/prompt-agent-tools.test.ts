@@ -43,11 +43,12 @@ const validPromptPackage = {
   followUpQuestions: [],
 };
 
-function runtime(generateHyperframe = vi.fn()): PromptAgentToolContext {
+function runtime(generateHyperframe = vi.fn(), forwardedDurationSec?: number): PromptAgentToolContext {
   return {
     env: {} as WorkerEnv,
     auth,
     forwardedProjectId: "project-1",
+    forwardedDurationSec,
     generateHyperframe,
   };
 }
@@ -117,6 +118,32 @@ describe("prompt agent server tools", () => {
     expect(generateHyperframe).toHaveBeenCalledWith({
       prompt: "Launch",
       durationSec: 8,
+      projectId: "project-1",
+      title: undefined,
+    });
+  });
+
+  it("uses the forwarded duration when approved generation omits duration", async () => {
+    const output = {
+      html: "<!DOCTYPE html>",
+      project: { id: "project-1", title: "Launch Reel" },
+      model: "openrouter/auto",
+      attempts: 1,
+      durationMs: 42,
+      lintOk: true,
+      lintErrors: [],
+    };
+    const generateHyperframe = vi.fn().mockResolvedValue(output);
+    const tool = getTool("generate_hyperframe");
+
+    await tool.execute(
+      { prompt: "Launch" },
+      { context: runtime(generateHyperframe, 10) } as never,
+    );
+
+    expect(generateHyperframe).toHaveBeenCalledWith({
+      prompt: "Launch",
+      durationSec: 10,
       projectId: "project-1",
       title: undefined,
     });

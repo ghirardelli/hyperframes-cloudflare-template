@@ -89,6 +89,7 @@ function mockAgentParams() {
     tools: [],
     forwardedProps: {
       currentPrompt: "A launch reel",
+      durationSec: 8,
       activeProjectTitle: "Launch Reel",
     },
     state: null,
@@ -191,6 +192,7 @@ describe("prompt agent worker route", () => {
         outputSchema: expect.any(Object),
         context: expect.objectContaining({
           auth: memberContext,
+          forwardedDurationSec: 8,
         }),
       }),
     );

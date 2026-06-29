@@ -68,6 +68,7 @@ export async function handlePromptAgentChat({
     env,
     auth,
     forwardedProjectId: forwardedProps.projectId,
+    forwardedDurationSec: forwardedProps.durationSec,
     generateHyperframe: async (input) =>
       generateHyperframeOutputSchema.parse(await generateHyperframe(input)),
   };
@@ -118,6 +119,7 @@ function buildPromptAgentSystemPrompt(
 
 Active model: ${model}.
 ${activeProject ? `Active project: ${activeProject}.` : "No active project title was provided."}
+${forwardedProps.durationSec ? `Selected duration: ${forwardedProps.durationSec} seconds.` : "No selected duration was provided; default to 6 seconds unless the user asks otherwise."}
 ${currentPrompt ? `Current editable prompt:\n${currentPrompt}` : "No editable prompt was provided."}
 
 Rules:

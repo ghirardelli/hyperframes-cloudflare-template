@@ -1,5 +1,5 @@
 // HTTP server inside the Cloudflare Container.
-// POST /render { files: [{ path, content: base64 }] } → 200 video/mp4 | 500 json{error}
+// POST /render { files: [{ path, content: base64 }], format?, width?, height? } → video bytes | 500 json{error}
 // GET  /healthz → 200 "ok"
 
 import { createServer } from "node:http";
@@ -13,6 +13,12 @@ const PORT = Number(process.env.PORT ?? 8080);
 const RENDER_TIMEOUT_MS = 10 * 60 * 1000;
 const KILL_GRACE_MS = 5_000;
 const HYPERFRAMES_BIN = resolve("node_modules/.bin/hyperframes");
+const SUPPORTED_FORMATS = new Set(["mp4", "webm", "mov"]);
+const CONTENT_TYPES = {
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
+};
 
 function readBody(req, max = 200 * 1024 * 1024) {
   return new Promise((resolveBody, reject) => {
@@ -54,11 +60,14 @@ function writeFiles(workdir, files) {
   );
 }
 
-function runRender(compDir, outFile) {
+function runRender(compDir, outFile, opts = {}) {
   return new Promise((resolveRun, reject) => {
+    const args = ["render", compDir, "-o", outFile, "--workers", "auto", "--format", opts.format ?? "mp4"];
+    if (opts.resolution) args.push("--resolution", opts.resolution);
+
     const child = spawn(
       HYPERFRAMES_BIN,
-      ["render", compDir, "-o", outFile, "--workers", "auto"],
+      args,
       { stdio: ["ignore", "pipe", "pipe"] },
     );
 
@@ -91,11 +100,25 @@ function runRender(compDir, outFile) {
   });
 }
 
+function normalizeFormat(format) {
+  if (format === undefined || format === null || format === "") return "mp4";
+  if (typeof format !== "string" || !SUPPORTED_FORMATS.has(format)) {
+    throw new Error("format must be one of mp4, webm, mov");
+  }
+  return format;
+}
+
+function resolutionFor(width, height) {
+  if (width === undefined && height === undefined) return undefined;
+  if (width === 1920 && height === 1080) return "1080p";
+  if (width === 3840 && height === 2160) return "4k";
+  throw new Error("resolution must be 1920x1080 or 3840x2160");
+}
+
 async function handleRender(req, res) {
   const t0 = Date.now();
   const workRoot = await mkdtemp(join(tmpdir(), "render-"));
   const compDir = join(workRoot, "composition");
-  const outFile = join(workRoot, "out.mp4");
   await mkdir(compDir, { recursive: true });
 
   try {
@@ -104,13 +127,16 @@ async function handleRender(req, res) {
     if (!Array.isArray(body?.files) || body.files.length === 0) {
       throw new Error("body.files must be a non-empty array");
     }
+    const format = normalizeFormat(body.format);
+    const resolution = resolutionFor(body.width, body.height);
+    const outFile = join(workRoot, `out.${format}`);
     await writeFiles(compDir, body.files);
 
-    await runRender(compDir, outFile);
+    await runRender(compDir, outFile, { format, resolution });
     const { size } = await stat(outFile);
 
     res.writeHead(200, {
-      "content-type": "video/mp4",
+      "content-type": CONTENT_TYPES[format],
       "content-length": size,
       "x-render-duration-ms": String(Date.now() - t0),
     });

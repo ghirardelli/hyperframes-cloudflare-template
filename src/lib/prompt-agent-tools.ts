@@ -14,6 +14,7 @@ export interface PromptAgentToolContext {
   env: WorkerEnv;
   auth: AppAuthContext;
   forwardedProjectId?: string;
+  forwardedDurationSec?: number;
   generateHyperframe: (input: {
     prompt: string;
     durationSec?: number;
@@ -56,7 +57,7 @@ export function createPromptAgentServerTools() {
       const runtime = requireRuntimeContext(execution?.context as PromptAgentToolContext | undefined);
       return runtime.generateHyperframe({
         prompt: args.prompt,
-        durationSec: args.durationSec,
+        durationSec: args.durationSec ?? runtime.forwardedDurationSec,
         projectId: args.projectId || runtime.forwardedProjectId,
         title: args.title,
       });

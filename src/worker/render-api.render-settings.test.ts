@@ -88,19 +88,29 @@ describe("render settings passthrough", () => {
 
   it("forwards chosen render settings to the render pipeline", async () => {
     const response = await handleWorkerApi(
-      renderRequest({ html: "<html></html>", width: 1280, height: 720, durationSec: 10, format: "webm" }),
+      renderRequest({ html: "<html></html>", width: 3840, height: 2160, durationSec: 10, format: "webm" }),
       env,
     );
 
     expect(response?.status).toBe(200);
     expect(mocks.containerBodies).toHaveLength(1);
     expect(mocks.containerBodies[0]).toMatchObject({
-      width: 1280,
-      height: 720,
+      width: 3840,
+      height: 2160,
       durationSec: 10,
       format: "webm",
     });
     expect(mocks.containerBodies[0].files).toBeDefined();
+    expect(mocks.put).toHaveBeenCalledWith(
+      expect.stringMatching(/\.webm$/),
+      expect.anything(),
+      expect.objectContaining({
+        httpMetadata: { contentType: "video/webm" },
+      }),
+    );
+    await expect(response?.json()).resolves.toEqual(
+      expect.objectContaining({ format: "webm" }),
+    );
   });
 
   it("preserves default behavior when render settings are omitted", async () => {
