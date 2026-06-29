@@ -1,10 +1,10 @@
 ## 1. Data Model And Migration
 
-- [ ] 1.1 Add a project source-files table keyed by `(projectId, path)` with content and timestamps in `src/db/schema.ts`.
-- [ ] 1.2 Add an assets representation (table for metadata + R2 object key) scoped by organization/project.
-- [ ] 1.3 Generate Drizzle migrations for the new tables.
-- [ ] 1.4 Add a backfill that seeds each existing project's `index.html` source file from its `currentHtml`, retaining `currentHtml` as a mirror during transition.
-- [ ] 1.5 Add a test that the migration/backfill produces `index.html` for existing projects and preserves renders/publish links.
+- [x] 1.1 Add a project source-files table keyed by `(projectId, path)` with content and timestamps in `src/db/schema.ts`.
+- [x] 1.2 Add an assets representation (table for metadata + R2 object key) scoped by organization/project.
+- [x] 1.3 Generate Drizzle migrations for the new tables.
+- [x] 1.4 Add a backfill that seeds each existing project's `index.html` source file from its `currentHtml`, retaining `currentHtml` as a mirror during transition.
+- [x] 1.5 Add a test that the migration/backfill produces `index.html` for existing projects and preserves renders/publish links.
 
 ## 2. Studio API Adapter And Mount
 

@@ -137,6 +137,61 @@ export const renders = pgTable("renders", {
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
 });
 
+// Multi-file project source. Each row is one text source file (index.html,
+// compositions/*.html, etc.) keyed uniquely by (projectId, path). Organization
+// id is denormalized for direct organization-scoped queries.
+export const projectFiles = pgTable(
+  "project_files",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    content: text("content").notNull().default(""),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => ({
+    projectPathUnique: uniqueIndex("project_files_project_id_path_unique").on(
+      table.projectId,
+      table.path,
+    ),
+  }),
+);
+
+// Binary project assets. Bytes live in R2 under r2Key (organization/project
+// prefixed); this table holds the metadata and logical path.
+export const projectAssets = pgTable(
+  "project_assets",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    r2Key: text("r2_key").notNull().unique(),
+    contentType: text("content_type").notNull(),
+    size: integer("size").notNull().default(0),
+    createdById: text("created_by_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => ({
+    projectPathUnique: uniqueIndex("project_assets_project_id_path_unique").on(
+      table.projectId,
+      table.path,
+    ),
+  }),
+);
+
 export const publishedProjects = pgTable("published_projects", {
   id: text("id").primaryKey(),
   organizationId: text("organization_id")
