@@ -55,19 +55,19 @@ function LoginPage() {
   }
 
   return (
-    <main className="min-h-dvh bg-white text-[#1d1d1f]">
+    <main className="min-h-dvh bg-white text-foreground">
       <div className="grid min-h-dvh grid-cols-1 lg:grid-cols-[minmax(420px,0.9fr)_minmax(0,1.35fr)]">
         <section className="flex items-center px-6 py-10 sm:px-10 lg:px-16">
           <div className="mx-auto w-full max-w-[520px]">
-            <a className="mb-16 inline-flex items-center gap-2 text-sm text-stone-700" href="/">
-              <Film className="h-4 w-4 text-[#0066cc]" aria-hidden="true" />
+            <a className="mb-16 inline-flex items-center gap-2 text-sm text-body" href="/">
+              <Film className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
               Motion Frames
             </a>
 
-            <h1 className="text-[40px] font-semibold leading-[1.08] text-[#1d1d1f] sm:text-[52px]">
+            <h1 className="text-[40px] font-semibold leading-[1.08] text-foreground sm:text-[52px]">
               Welcome to MotionFrame.
             </h1>
-            <p className="mt-4 text-[21px] leading-[1.35] text-stone-600">
+            <p className="mt-4 text-[21px] leading-[1.35] text-muted-foreground">
               Create a promo video, presentation deck, and more...
             </p>
 
@@ -111,7 +111,7 @@ function LoginPage() {
           </div>
         </section>
 
-        <section className="hidden min-h-dvh items-center overflow-hidden bg-[#f5f5f7] p-8 lg:flex">
+        <section className="hidden min-h-dvh items-center overflow-hidden bg-background p-8 lg:flex">
           <WorkspacePreview />
         </section>
       </div>
@@ -121,7 +121,7 @@ function LoginPage() {
 
 function WorkspacePreview() {
   const cards = [
-    ["Promo cut", "12s", "bg-[#f5f5f7]"],
+    ["Promo cut", "12s", "bg-background"],
     ["Launch deck", "8 slides", "bg-[#dce8f7]"],
     ["Founder reel", "24s", "bg-[#e9e2d2]"],
   ];
@@ -132,14 +132,14 @@ function WorkspacePreview() {
       <div className="grid h-full grid-cols-[180px_minmax(0,1fr)] gap-6">
         <aside className="rounded-[22px] border border-white/10 bg-white/[0.06] p-4">
           <div className="mb-8 flex items-center gap-2 text-sm">
-            <span className="h-7 w-7 rounded-full bg-[#0066cc]" />
+            <span className="h-7 w-7 rounded-full bg-white" />
             Acme Studio
           </div>
           {["Home", "Projects", "Published", "Renders"].map((item, index) => (
             <div
               key={item}
               className={`mb-2 rounded-full px-3 py-2 text-sm ${
-                index === 0 ? "bg-white text-[#1d1d1f]" : "text-white/70"
+                index === 0 ? "bg-white text-foreground" : "text-white/70"
               }`}
             >
               {item}
@@ -161,9 +161,9 @@ function WorkspacePreview() {
 
           <div className="grid flex-1 grid-cols-3 gap-5">
             {cards.map(([title, meta, className]) => (
-              <div key={title} className={`flex flex-col justify-between rounded-[24px] p-5 text-[#1d1d1f] ${className}`}>
+              <div key={title} className={`flex flex-col justify-between rounded-[24px] p-5 text-foreground ${className}`}>
                 <div>
-                  <p className="text-sm text-stone-500">{meta}</p>
+                  <p className="text-sm text-muted-foreground">{meta}</p>
                   <h3 className="mt-2 text-2xl font-semibold leading-tight">{title}</h3>
                 </div>
                 <div className="h-24 rounded-[18px] bg-white/70" />

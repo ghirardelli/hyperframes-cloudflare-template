@@ -147,7 +147,7 @@ function MotionFramesHome() {
   const statusClassName = useMemo(() => {
     if (status.tone === "success") return "border-emerald-400/70 bg-emerald-50 text-emerald-900";
     if (status.tone === "error") return "border-red-300 bg-red-50 text-red-900";
-    return "border-stone-200 bg-white text-stone-700";
+    return "border-hairline bg-white text-body";
   }, [status.tone]);
 
   async function generate() {
@@ -231,9 +231,9 @@ function MotionFramesHome() {
 
   if (!me) {
     return (
-      <main className="grid min-h-dvh place-items-center bg-stone-50 px-6 text-stone-950">
+      <main className="grid min-h-dvh place-items-center bg-background px-6 text-foreground">
         <div className="text-center">
-          <Film className="mx-auto h-8 w-8 text-[#0066cc]" aria-hidden="true" />
+          <Film className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden="true" />
           <p className="mt-4 text-lg font-medium">Opening Motion Frames...</p>
         </div>
       </main>
@@ -241,16 +241,16 @@ function MotionFramesHome() {
   }
 
   return (
-    <main className="min-h-dvh bg-stone-50 text-stone-950">
+    <main className="min-h-dvh bg-background text-foreground">
       <section className="grid min-h-dvh w-full grid-cols-1 gap-6 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_400px] lg:px-8">
         <div className="flex min-h-[calc(100dvh-2rem)] flex-col gap-4">
-          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 pb-4">
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-hairline pb-4">
             <div>
-              <div className="flex items-center gap-2 text-sm font-medium text-[#0066cc]">
+              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                 <Film className="h-4 w-4" aria-hidden="true" />
                 {me?.organization.name ?? "Motion Frames"}
               </div>
-              <h1 className="mt-2 text-4xl font-semibold text-stone-950 sm:text-5xl">
+              <h1 className="mt-2 text-4xl font-semibold text-foreground sm:text-5xl">
                 Motion Frames
               </h1>
             </div>
@@ -280,13 +280,13 @@ function MotionFramesHome() {
                   Profile
                 </a>
               </Button>
-              <Badge variant="secondary" className="h-8 rounded-full border-stone-300 bg-white px-3">
+              <Badge variant="secondary" className="h-8 rounded-full border-hairline bg-white px-3">
                 {activeProjectTitle || activeSource}
               </Badge>
             </nav>
           </header>
 
-          <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-lg border border-stone-200 bg-neutral-950 p-3 shadow-sm">
+          <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-lg border border-hairline bg-neutral-950 p-3 shadow-sm">
             <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-md border border-white/15 bg-black/45 px-2 py-1 text-xs text-white">
               <span className="h-2 w-2 rounded-full bg-emerald-400" />
               1920 x 1080

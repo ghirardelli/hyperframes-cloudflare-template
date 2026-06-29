@@ -94,7 +94,7 @@ function AdminPage() {
 
   if (!canAdmin) {
     return (
-      <main className="min-h-dvh bg-[#f5f5f7] px-4 py-10 text-[#1d1d1f] sm:px-6 lg:px-8">
+      <main className="min-h-dvh bg-background px-4 py-10 text-foreground sm:px-6 lg:px-8">
         <div className="mx-auto w-full max-w-3xl">
           <TopLinks />
           <p className="mt-16 text-2xl font-semibold">{status || "Checking access..."}</p>
@@ -104,11 +104,11 @@ function AdminPage() {
   }
 
   return (
-    <main className="min-h-dvh bg-[#f5f5f7] px-4 py-10 text-[#1d1d1f] sm:px-6 lg:px-8">
+    <main className="min-h-dvh bg-background px-4 py-10 text-foreground sm:px-6 lg:px-8">
       <div className="w-full space-y-8">
         <TopLinks />
         <header>
-          <p className="text-sm text-[#0066cc]">Admin</p>
+          <p className="text-sm text-muted-foreground">Admin</p>
           <h1 className="mt-2 text-4xl font-semibold">Users and organizations</h1>
         </header>
 
@@ -125,24 +125,24 @@ function AdminPage() {
                 <Field name="password" label="Password" type="password" />
                 <div className="space-y-2">
                   <Label htmlFor="role">Role</Label>
-                  <select id="role" name="role" className="h-11 w-full rounded-full border border-stone-300 bg-white px-4 text-sm">
+                  <select id="role" name="role" className="h-10 w-full rounded-md border border-hairline bg-background px-4 text-sm">
                     <option value="user">User</option>
                     <option value="admin">Admin</option>
                   </select>
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <label className="flex items-center gap-2 rounded-full border border-stone-300 bg-white px-4 py-3">
+                  <label className="flex items-center gap-2 rounded-md border border-hairline bg-background px-4 py-3">
                     <input name="organizationMode" value="existing" type="radio" defaultChecked />
                     Existing org
                   </label>
-                  <label className="flex items-center gap-2 rounded-full border border-stone-300 bg-white px-4 py-3">
+                  <label className="flex items-center gap-2 rounded-md border border-hairline bg-background px-4 py-3">
                     <input name="organizationMode" value="new" type="radio" />
                     New org
                   </label>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="organizationId">Existing organization</Label>
-                  <select id="organizationId" name="organizationId" className="h-11 w-full rounded-full border border-stone-300 bg-white px-4 text-sm">
+                  <select id="organizationId" name="organizationId" className="h-10 w-full rounded-md border border-hairline bg-background px-4 text-sm">
                     {organizations.map((org) => (
                       <option key={org.id} value={org.id}>
                         {org.name}
@@ -155,24 +155,24 @@ function AdminPage() {
                   <UserPlus className="h-4 w-4" aria-hidden="true" />
                   Create user
                 </Button>
-                {status ? <p className="text-sm text-stone-600">{status}</p> : null}
+                {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
               </form>
             </CardContent>
           </Card>
 
-          <section className="rounded-[18px] border border-stone-200 bg-white">
-            <div className="grid grid-cols-[1fr_1fr_110px] gap-3 border-b border-stone-200 px-5 py-3 text-sm font-semibold text-stone-500">
+          <section className="rounded-xl border border-hairline bg-card">
+            <div className="grid grid-cols-[1fr_1fr_110px] gap-3 border-b border-hairline px-5 py-3 text-sm font-semibold text-muted-foreground">
               <span>User</span>
               <span>Organization</span>
               <span>Status</span>
             </div>
             {users.map((user) => (
-              <div key={user.id} className="grid grid-cols-[1fr_1fr_110px] items-center gap-3 border-b border-stone-100 px-5 py-4 last:border-b-0">
+              <div key={user.id} className="grid grid-cols-[1fr_1fr_110px] items-center gap-3 border-b border-hairline-soft px-5 py-4 last:border-b-0">
                 <div>
                   <p className="font-medium">{user.name}</p>
-                  <p className="text-sm text-stone-500">{user.email}</p>
+                  <p className="text-sm text-muted-foreground">{user.email}</p>
                 </div>
-                <p className="text-sm text-stone-600">{user.organizationName || "Unassigned"}</p>
+                <p className="text-sm text-muted-foreground">{user.organizationName || "Unassigned"}</p>
                 <Button
                   type="button"
                   variant={user.banned ? "default" : "outline"}
