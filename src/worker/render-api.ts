@@ -27,6 +27,7 @@ import {
 } from "../lib/auth-context";
 import { DEFAULT_MODEL, generateComposition, GenerateError } from "../lib/generate";
 import { handleStudioFilesApi, renderProjectPreview, upsertProjectFile } from "./studio-files-api";
+import { handlePromptAgentChat } from "./prompt-agent-api";
 
 export interface WorkerEnv extends TenantAuthEnv {
   ASSETS: Fetcher;
@@ -82,6 +83,19 @@ export async function handleWorkerApi(
       },
       { headers: { "cache-control": "public, max-age=300" } },
     );
+  }
+
+  if (req.method === "POST" && pathname === "/api/agent/chat") {
+    const auth = await protectedContext(req, env);
+    if (auth instanceof Response) return auth;
+    const tenant = requireTenantOrganization(auth);
+    if (tenant) return tenant;
+    return handlePromptAgentChat({
+      env,
+      req,
+      auth,
+      generateHyperframe: (body) => generateAndPersistComposition(env, req, auth, body),
+    });
   }
 
   const appApiResponse = await handleAppApi(env, req, pathname);
@@ -342,16 +356,27 @@ async function handleGenerate(
     return jsonError("invalid JSON body", 400);
   }
 
-  if (!body.prompt || typeof body.prompt !== "string") {
-    return jsonError("missing prompt", 400);
+  try {
+    return Response.json(await generateAndPersistComposition(env, req, context, body));
+  } catch (err) {
+    if (err instanceof GenerateError) {
+      return jsonError(err.message, err.status);
+    }
+    return jsonError(`generation failed: ${msg(err)}`, 500);
   }
-  if (utf8ByteLength(body.prompt) > MAX_GENERATE_PROMPT_BYTES) {
-    return jsonError(`prompt exceeds ${MAX_GENERATE_PROMPT_BYTES} bytes`, 413);
-  }
+}
+
+async function generateAndPersistComposition(
+  env: WorkerEnv,
+  req: Request,
+  context: AppAuthContext,
+  body: GenerateRequestBody,
+) {
+  assertValidGenerateBody(body);
 
   const openRouterKey = env.OPENROUTER_API_KEY?.trim();
   if (!openRouterKey) {
-    return jsonError(
+    throw new GenerateError(
       "OpenRouter API key is not configured. Set OPENROUTER_API_KEY as a Cloudflare secret.",
       500,
     );
@@ -360,32 +385,41 @@ async function handleGenerate(
   const referer = req.headers.get("origin") ?? new URL(req.url).origin;
   const configuredModel = env.OPENROUTER_MODEL?.trim() || undefined;
 
-  try {
-    const result = await generateComposition({
-      apiKey: openRouterKey,
-      prompt: body.prompt,
-      model: configuredModel,
-      durationSec: normalizedDuration(body.durationSec),
-      referer,
-      appTitle: "Motion Frames",
-    });
+  const result = await generateComposition({
+    apiKey: openRouterKey,
+    prompt: body.prompt,
+    model: configuredModel,
+    durationSec: normalizedDuration(body.durationSec),
+    referer,
+    appTitle: "Motion Frames",
+  });
 
-    const project = await upsertGeneratedProject(env, context, body, result.html);
+  const project = await upsertGeneratedProject(env, context, body, result.html);
 
-    return Response.json({
-      html: result.html,
-      project,
-      model: result.model,
-      attempts: result.attempts,
-      durationMs: result.durationMs,
-      lintErrors: result.lintErrors,
-      lintOk: result.lintErrors.length === 0,
-    });
-  } catch (err) {
-    if (err instanceof GenerateError) {
-      return jsonError(err.message, err.status);
-    }
-    return jsonError(`generation failed: ${msg(err)}`, 500);
+  return {
+    html: result.html,
+    project: project
+      ? {
+          id: project.id,
+          title: project.title,
+        }
+      : null,
+    model: result.model,
+    attempts: result.attempts,
+    durationMs: result.durationMs,
+    lintErrors: result.lintErrors,
+    lintOk: result.lintErrors.length === 0,
+  };
+}
+
+function assertValidGenerateBody(
+  body: GenerateRequestBody,
+): asserts body is GenerateRequestBody & { prompt: string } {
+  if (!body.prompt || typeof body.prompt !== "string") {
+    throw new GenerateError("missing prompt", 400);
+  }
+  if (utf8ByteLength(body.prompt) > MAX_GENERATE_PROMPT_BYTES) {
+    throw new GenerateError(`prompt exceeds ${MAX_GENERATE_PROMPT_BYTES} bytes`, 413);
   }
 }
 

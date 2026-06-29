@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { AppHeader } from "@/components/app-header";
+import { PromptAgentPanel } from "@/components/prompt-agent-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +24,7 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import type { GenerateHyperframeOutput } from "@/lib/prompt-agent-contract";
 
 export const Route = createFileRoute("/")({
   component: MotionFramesHome,
@@ -184,6 +186,19 @@ function MotionFramesHome() {
     }
   }
 
+  function applyAgentGeneration(data: GenerateHyperframeOutput) {
+    setGeneratedHtml(data.html);
+    setRenderUrl("");
+    if (data.project?.id) {
+      setActiveProjectId(data.project.id);
+      setActiveProjectTitle(data.project.title);
+    }
+    setStatus({
+      tone: data.lintOk ? "success" : "idle",
+      message: `Generated with ${data.model} in ${data.attempts} attempt(s).`,
+    });
+  }
+
   async function render() {
     if (!canRender) return;
     setIsRendering(true);
@@ -279,6 +294,19 @@ function MotionFramesHome() {
         </div>
 
         <aside className="flex flex-col gap-4">
+          <PromptAgentPanel
+            prompt={prompt}
+            onPromptChange={setPrompt}
+            aiEnabled={aiEnabled}
+            isConfigReady={isConfigReady}
+            modelLabel={modelLabel}
+            activeProjectId={activeProjectId}
+            activeProjectTitle={activeProjectTitle}
+            isGenerating={isGenerating}
+            isRendering={isRendering}
+            onGenerated={applyAgentGeneration}
+          />
+
           <Card>
             <CardHeader>
               <CardTitle>Generate</CardTitle>

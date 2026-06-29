@@ -48,8 +48,8 @@ export function AppHeader({ active }: { active?: NavKey }) {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-hairline bg-background/95 backdrop-blur">
-      <div className="flex h-16 w-full items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-        <a href="/" className="flex items-center gap-2 text-sm font-semibold text-foreground">
+      <div className="flex min-h-16 w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 sm:flex-nowrap sm:px-6 lg:px-8">
+        <a href="/" className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground">
           <Film className="h-5 w-5" aria-hidden="true" />
           Motion Frames
           {me?.organization?.name ? (
@@ -59,14 +59,14 @@ export function AppHeader({ active }: { active?: NavKey }) {
           ) : null}
         </a>
 
-        <nav className="flex items-center gap-1">
+        <nav className="flex min-w-0 flex-wrap items-center gap-1">
           {NAV.filter((item) => !item.adminOnly || isAdmin).map((item) => (
             <a
               key={item.key}
               href={item.href}
               aria-current={active === item.key ? "page" : undefined}
               className={
-                "rounded-md px-3 py-2 text-sm transition-colors " +
+                "rounded-md px-2 py-2 text-sm transition-colors sm:px-3 " +
                 (active === item.key
                   ? "font-semibold text-foreground"
                   : "font-medium text-muted-foreground hover:bg-surface-card hover:text-foreground")
@@ -75,7 +75,7 @@ export function AppHeader({ active }: { active?: NavKey }) {
               {item.label}
             </a>
           ))}
-          <Button type="button" variant="secondary" size="sm" className="ml-2" onClick={logout}>
+          <Button type="button" variant="secondary" size="sm" className="ml-1 sm:ml-2" onClick={logout}>
             <LogOut className="h-4 w-4" aria-hidden="true" />
             Logout
           </Button>
