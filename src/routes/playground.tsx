@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Copy, Play } from "lucide-react";
 
+import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/playground")({
@@ -52,17 +53,9 @@ function PlaygroundPage() {
   const items = [...examples, ...publishedProjects];
 
   return (
-    <main className="min-h-dvh bg-white px-4 py-10 text-foreground sm:px-6 lg:px-8">
-      <div className="w-full space-y-10">
-        <nav className="flex flex-wrap gap-2 text-sm">
-          <Button asChild variant="secondary" size="sm">
-            <a href="/">Workspace</a>
-          </Button>
-          <Button asChild variant="ghost" size="sm">
-            <a href="/profile">Profile</a>
-          </Button>
-        </nav>
-
+    <div className="flex min-h-dvh flex-col bg-white text-foreground">
+      <AppHeader active="playground" />
+      <main className="w-full space-y-10 px-4 py-10 sm:px-6 lg:px-8">
         <header className="border-b border-hairline pb-8">
           <p className="text-sm text-muted-foreground">Organization Playground</p>
           <h1 className="mt-2 text-5xl font-semibold">Examples Catalog {catalogCount}</h1>
@@ -102,8 +95,8 @@ function PlaygroundPage() {
           ))}
         </section>
         {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
 

@@ -5,14 +5,13 @@ import {
   Download,
   Film,
   FolderKanban,
-  Grid2X2,
   Loader2,
   Play,
   RotateCcw,
   Sparkles,
-  UserRound,
 } from "lucide-react";
 
+import { AppHeader } from "@/components/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -91,7 +90,6 @@ function MotionFramesHome() {
   const activeSource = generatedHtml ? "Generated HTML" : "Bundled intro";
   const canGenerate = aiEnabled && prompt.trim().length > 0;
   const canRender = !isRendering && !isGenerating;
-  const isAdmin = me?.user.role?.split(",").map((role) => role.trim()).includes("admin") ?? false;
 
   useEffect(() => {
     fetch("/api/me")
@@ -241,50 +239,28 @@ function MotionFramesHome() {
   }
 
   return (
-    <main className="min-h-dvh bg-background text-foreground">
-      <section className="grid min-h-dvh w-full grid-cols-1 gap-6 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_400px] lg:px-8">
-        <div className="flex min-h-[calc(100dvh-2rem)] flex-col gap-4">
-          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-hairline pb-4">
-            <div>
-              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                <Film className="h-4 w-4" aria-hidden="true" />
-                {me?.organization.name ?? "Motion Frames"}
-              </div>
-              <h1 className="mt-2 text-4xl font-semibold text-foreground sm:text-5xl">
-                Motion Frames
-              </h1>
-            </div>
-            <nav className="flex flex-wrap items-center gap-2">
-              <Button asChild variant="ghost" size="sm">
-                <a href="/playground">
-                  <Grid2X2 className="h-4 w-4" aria-hidden="true" />
-                  Playground
-                </a>
-              </Button>
+    <div className="flex min-h-dvh flex-col bg-background text-foreground">
+      <AppHeader active="workspace" />
+      <section className="grid w-full flex-1 grid-cols-1 gap-6 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_400px] lg:px-8">
+        <div className="flex min-h-0 flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h1 className="text-2xl font-semibold text-foreground">
+              {activeProjectTitle || "Workspace"}
+            </h1>
+            <div className="flex items-center gap-2">
               {activeProjectId ? (
-                <Button asChild variant="ghost" size="sm">
+                <Button asChild variant="secondary" size="sm">
                   <a href={`/projects/${activeProjectId}/studio`}>
                     <FolderKanban className="h-4 w-4" aria-hidden="true" />
-                    Studio
+                    Open in Studio
                   </a>
                 </Button>
               ) : null}
-              {isAdmin ? (
-                <Button asChild variant="ghost" size="sm">
-                  <a href="/admin">Admin</a>
-                </Button>
-              ) : null}
-              <Button asChild variant="secondary" size="sm">
-                <a href="/profile">
-                  <UserRound className="h-4 w-4" aria-hidden="true" />
-                  Profile
-                </a>
-              </Button>
-              <Badge variant="secondary" className="h-8 rounded-full border-hairline bg-white px-3">
+              <Badge variant="secondary" className="h-8 rounded-full px-3">
                 {activeProjectTitle || activeSource}
               </Badge>
-            </nav>
-          </header>
+            </div>
+          </div>
 
           <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-lg border border-hairline bg-neutral-950 p-3 shadow-sm">
             <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-md border border-white/15 bg-black/45 px-2 py-1 text-xs text-white">
@@ -302,7 +278,7 @@ function MotionFramesHome() {
           </div>
         </div>
 
-        <aside className="flex min-h-[calc(100dvh-2rem)] flex-col gap-4">
+        <aside className="flex flex-col gap-4">
           <Card>
             <CardHeader>
               <CardTitle>Generate</CardTitle>
@@ -385,7 +361,7 @@ function MotionFramesHome() {
           </div>
         </aside>
       </section>
-    </main>
+    </div>
   );
 }
 
