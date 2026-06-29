@@ -30,8 +30,8 @@ Our current model stores one `currentHtml` string per project; renders go throug
 
 ## Decisions
 
-**1. Mount `createStudioApi(adapter)` on the Worker, don't reimplement the routes.**
-We reuse the maintained Hono route surface and supply only host behavior via the adapter. *Alternative:* hand-roll file/preview/render endpoints — rejected; it would drift from the client's expectations and duplicate maintained logic.
+**1. Reimplement the needed route subset on the Worker (SUPERSEDED original plan to mount `createStudioApi`).**
+`@hyperframes/studio-server` does Node `fs` I/O in its routes and the adapter has no file methods, so it cannot run on Workers (see "Implementation Finding"). Instead we implement, on the Worker against D1 (`project_files`) + R2 (`project_assets`), only the endpoints the new client surfaces need — file CRUD, preview (incl. sub-composition + asset resolution), and asset upload/list/serve — using **our own simple JSON contract** rather than matching studio-server's wire format. On the client we use the studio package's **presentational** components (`FileTree`, `SourceEditor` — both props/callback driven, no built-in fetching) plus custom Compositions/Assets panels wired to our endpoints, so we are not bound to studio-server's contract. *Alternative (rejected):* host studio-server in the Node render Container — turns a request-scoped container into a stateful editing service (heavier infra, persistence/concurrency).
 
 **2. Storage: source files in the relational DB, assets in R2.**
 Text source files (`index.html`, `compositions/*.html`, etc.) are rows keyed by `(projectId, path)` in Neon/Drizzle (small, diff-friendly, transactional). Binary assets go to R2 under an organization/project prefix. The adapter's opaque `projectDir`/`dir` is the project id; adapter methods resolve files from these stores rather than a filesystem (the fs helpers `walkDir`/fs-reading variants are not used). *Alternative:* all files in R2 — rejected for source because the DB gives transactional multi-file saves and simpler listing; assets stay in R2 because they are binary and large.
@@ -66,6 +66,15 @@ A Drizzle migration plus a backfill creates an `index.html` source file per exis
 5. Verify (`npm test`, `typecheck`, `build`, `deploy:dry-run`) and browser-verify multi-file editing, sub-composition preview, asset upload, and render.
 
 **Rollback:** the Studio falls back to single-file editing (prior change) if the file API is disabled; the new tables/R2 prefix can be dropped without affecting `currentHtml`-based projects since it is retained as a mirror during transition.
+
+## Implementation Finding (blocks Decision #1)
+
+Inspecting the installed `@hyperframes/studio-server@0.7.17` dist during implementation: its route handlers use Node `fs`/`fs/promises` directly (`readFileSync`/`writeFileSync`/`existsSync`/`mkdirSync`, 50+ sites) against `project.dir`. The `StudioApiAdapter` only abstracts `bundle`/`resolveProject`/`lint`/`startRender`/etc. — it has **no file read/write methods** — so the file-CRUD, preview, and asset routes do filesystem I/O inside the server. Cloudflare Workers have no filesystem, so `createStudioApi(adapter)` cannot be mounted on the Worker as Decision #1 assumed.
+
+Two viable paths replace Decision #1:
+
+- **A. Reimplement the route subset on the Worker, backed by D1/R2.** Implement only the endpoints the new client surfaces need — file CRUD (`/projects/:id/files/*`, `duplicate-file`), preview + sub-composition preview (`/preview`, `/preview/comp/*`, `/preview/<asset>`), asset upload/list/serve (`/upload`), and renders — against the `project_files` (DB) and `project_assets` (R2) stores. Reuse string-level helpers (sub-composition assembly) reimplemented to read from the store. Advanced server routes (`file-mutations/*`, `gsap-mutations/*`, `thumbnail`, `waveform`, `storyboard`, `fonts`, `registry`) are deferred/stubbed. Stays fully serverless and matches the storage decision; more code than "mount the app."
+- **B. Host `@hyperframes/studio-server` in the Container (Node).** Materialize a project's files from D1/R2 into the container filesystem, run the Hono server there, proxy `/api/projects/:id/...` editing requests to the container DO, and persist changes back to D1/R2. Reuses the full route surface (including advanced mutations) but turns the currently request-scoped render container into a stateful editing service — heavier infra, persistence/concurrency complexity.
 
 ## Open Questions
 

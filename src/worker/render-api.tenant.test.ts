@@ -277,7 +277,9 @@ describe("tenant-aware worker APIs", () => {
   it("serves a project preview to a same-organization member", async () => {
     apiMocks.requireAuthContext.mockResolvedValue(memberContext);
     apiMocks.selectRows = [
-      [{ id: "project-1", organizationId: "org-1", currentHtml: "<html><body>preview-body</body></html>" }],
+      [{ id: "project-1", organizationId: "org-1" }], // requireProjectAccess
+      [], // project_files index.html lookup (no files yet)
+      [{ currentHtml: "<html><body>preview-body</body></html>" }], // currentHtml mirror fallback
     ];
 
     const response = await handleWorkerApi(

@@ -26,6 +26,7 @@ import {
   type TenantAuthEnv,
 } from "../lib/auth-context";
 import { DEFAULT_MODEL, generateComposition, GenerateError } from "../lib/generate";
+import { handleStudioFilesApi, renderProjectPreview } from "./studio-files-api";
 
 export interface WorkerEnv extends TenantAuthEnv {
   ASSETS: Fetcher;
@@ -490,6 +491,14 @@ async function handleAppApi(
       return await handleListProjectRenders(env, auth, projectRendersMatch[1]);
     }
 
+    // Multi-file Studio file/asset/preview-subpath routes (D1 + R2).
+    if (/^\/api\/projects\/[^/]+\/(files|assets|duplicate-file|preview\/)/.test(pathname)) {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      const studioResp = await handleStudioFilesApi(env, req, pathname, auth);
+      if (studioResp) return studioResp;
+    }
+
     const projectPublishMatch = pathname.match(/^\/api\/projects\/([^/]+)\/publish$/);
     if (projectPublishMatch && req.method === "POST") {
       const tenant = requireTenantOrganization(auth);
@@ -721,11 +730,8 @@ async function handleProjectPreview(
   context: AppAuthContext,
   projectId: string,
 ): Promise<Response> {
-  const project = await requireProjectAccess(context, projectId, env);
-  const html =
-    project.currentHtml ||
-    "<!doctype html><html><head><meta charset=\"utf-8\"><title>No composition</title></head><body></body></html>";
-  return new Response(html, { headers: PREVIEW_HEADERS });
+  await requireProjectAccess(context, projectId, env);
+  return renderProjectPreview(env, createDb(env), context.organization.id, projectId);
 }
 
 /**
