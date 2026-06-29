@@ -65,7 +65,7 @@ function ProfilePage() {
   }
 
   return (
-    <main className="min-h-dvh bg-[#f5f5f7] px-4 py-10 text-[#1d1d1f] sm:px-6 lg:px-8">
+    <main className="min-h-dvh bg-background px-4 py-10 text-foreground sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-6xl space-y-8">
         <nav className="flex flex-wrap gap-2 text-sm">
           <Button asChild variant="secondary" size="sm">
@@ -76,7 +76,7 @@ function ProfilePage() {
           </Button>
         </nav>
         <header>
-          <p className="text-sm text-[#0066cc]">Profile</p>
+          <p className="text-sm text-muted-foreground">Profile</p>
           <h1 className="mt-2 text-4xl font-semibold">Account settings</h1>
         </header>
 
@@ -119,7 +119,7 @@ function ProfilePage() {
             </CardContent>
           </Card>
         </div>
-        {status ? <p className="text-sm text-stone-600">{status}</p> : null}
+        {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
       </div>
     </main>
   );
@@ -129,7 +129,7 @@ function ReadOnly({ label, value }: { label: string; value: string }) {
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
-      <div className="rounded-full border border-stone-200 bg-[#fafafc] px-4 py-3 text-sm text-stone-600">
+      <div className="rounded-md border border-hairline bg-surface-card px-4 py-3 text-sm text-muted-foreground">
         {value || "Loading..."}
       </div>
     </div>

@@ -52,7 +52,7 @@ function PlaygroundPage() {
   const items = [...examples, ...publishedProjects];
 
   return (
-    <main className="min-h-dvh bg-white px-4 py-10 text-[#1d1d1f] sm:px-6 lg:px-8">
+    <main className="min-h-dvh bg-white px-4 py-10 text-foreground sm:px-6 lg:px-8">
       <div className="w-full space-y-10">
         <nav className="flex flex-wrap gap-2 text-sm">
           <Button asChild variant="secondary" size="sm">
@@ -63,23 +63,23 @@ function PlaygroundPage() {
           </Button>
         </nav>
 
-        <header className="border-b border-stone-200 pb-8">
-          <p className="text-sm text-[#0066cc]">Organization Playground</p>
+        <header className="border-b border-hairline pb-8">
+          <p className="text-sm text-muted-foreground">Organization Playground</p>
           <h1 className="mt-2 text-5xl font-semibold">Examples Catalog {catalogCount}</h1>
-          <p className="mt-4 max-w-2xl text-[21px] leading-[1.47] text-stone-600">
+          <p className="mt-4 max-w-2xl text-[21px] leading-[1.47] text-muted-foreground">
             Published projects and starter examples stay inside your organization.
           </p>
         </header>
 
         <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {items.map((item) => (
-            <article key={item.id} className="rounded-[18px] border border-stone-200 bg-[#f5f5f7] p-5">
-              <div className="mb-5 aspect-video rounded-[12px] bg-[#252527]" />
-              <p className="text-sm text-stone-500">
+            <article key={item.id} className="rounded-[18px] border border-hairline bg-background p-5">
+              <div className="mb-5 aspect-video rounded-lg bg-surface-card" />
+              <p className="text-sm text-muted-foreground">
                 {item.durationSec ?? 6}s · {item.width ?? 1920}×{item.height ?? 1080}
               </p>
               <h2 className="mt-2 text-2xl font-semibold">{item.title}</h2>
-              <p className="mt-2 min-h-12 text-sm leading-6 text-stone-600">
+              <p className="mt-2 min-h-12 text-sm leading-6 text-muted-foreground">
                 {item.description || "Organization-visible Motion Frames project."}
               </p>
               <div className="mt-5 flex gap-2">
@@ -101,7 +101,7 @@ function PlaygroundPage() {
             </article>
           ))}
         </section>
-        {status ? <p className="text-sm text-stone-600">{status}</p> : null}
+        {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
       </div>
     </main>
   );
