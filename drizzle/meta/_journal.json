@@ -15,6 +15,13 @@
       "when": 1782678683995,
       "tag": "0001_blue_ken_ellis",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782699630020,
+      "tag": "0002_messy_silver_fox",
+      "breakpoints": true
     }
   ]
 }

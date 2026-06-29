@@ -26,6 +26,7 @@ import {
   type TenantAuthEnv,
 } from "../lib/auth-context";
 import { DEFAULT_MODEL, generateComposition, GenerateError } from "../lib/generate";
+import { handleStudioFilesApi, renderProjectPreview, upsertProjectFile } from "./studio-files-api";
 
 export interface WorkerEnv extends TenantAuthEnv {
   ASSETS: Fetcher;
@@ -490,6 +491,14 @@ async function handleAppApi(
       return await handleListProjectRenders(env, auth, projectRendersMatch[1]);
     }
 
+    // Multi-file Studio file/asset/preview-subpath routes (D1 + R2).
+    if (/^\/api\/projects\/[^/]+\/(files|assets|duplicate-file|preview\/)/.test(pathname)) {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      const studioResp = await handleStudioFilesApi(env, req, pathname, auth);
+      if (studioResp) return studioResp;
+    }
+
     const projectPublishMatch = pathname.match(/^\/api\/projects\/([^/]+)\/publish$/);
     if (projectPublishMatch && req.method === "POST") {
       const tenant = requireTenantOrganization(auth);
@@ -721,11 +730,8 @@ async function handleProjectPreview(
   context: AppAuthContext,
   projectId: string,
 ): Promise<Response> {
-  const project = await requireProjectAccess(context, projectId, env);
-  const html =
-    project.currentHtml ||
-    "<!doctype html><html><head><meta charset=\"utf-8\"><title>No composition</title></head><body></body></html>";
-  return new Response(html, { headers: PREVIEW_HEADERS });
+  await requireProjectAccess(context, projectId, env);
+  return renderProjectPreview(env, createDb(env), context.organization.id, projectId);
 }
 
 /**
@@ -791,6 +797,8 @@ async function handleUpdateProject(
       prompt: body.prompt,
       html: body.html,
     });
+    // Keep the multi-file index.html in sync with the currentHtml mirror.
+    await upsertProjectFile(createDb(env), context.organization.id, projectId, "index.html", body.html);
   }
 
   return Response.json({ project: rows[0] });
@@ -902,6 +910,7 @@ async function upsertGeneratedProject(
       prompt: body.prompt,
       html,
     });
+    await upsertProjectFile(createDb(env), context.organization.id, body.projectId, "index.html", html);
     return rows[0];
   }
   return createProject(env, context, {
@@ -947,6 +956,7 @@ async function createProject(
       prompt: input.prompt || null,
       html: input.html,
     });
+    await upsertProjectFile(db, context.organization.id, projectId, "index.html", input.html);
   }
 
   return rows[0];
