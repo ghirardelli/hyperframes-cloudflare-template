@@ -1,6 +1,7 @@
 export const CREATION_MODE_STORAGE_KEY = "motion-frames.creationMode";
 
 export type CreationMode = "agent" | "manual";
+export type CreationTab = CreationMode | "render";
 export type RenderFormat = "mp4" | "webm" | "mov";
 export type ExportResolutionId = "1080p" | "4k";
 
@@ -19,11 +20,11 @@ export interface ExportResolutionPreset {
 export const DEFAULT_CREATION_MODE: CreationMode = "agent";
 export const DEFAULT_DURATION_SEC = 6;
 export const MIN_DURATION_SEC = 1;
-export const MAX_DURATION_SEC = 120;
+export const MAX_DURATION_SEC = 300;
 export const DEFAULT_RENDER_RESOLUTION_ID: ExportResolutionId = "1080p";
 export const DEFAULT_RENDER_FORMAT: RenderFormat = "mp4";
 
-export const DURATION_PRESETS = [3, 6, 8, 10, 15] as const;
+export const DURATION_PRESETS = [3, 6, 8, 10, 15, 30, 60, 120, 180, 240, 300] as const;
 
 export const EXPORT_RESOLUTION_PRESETS: ReadonlyArray<ExportResolutionPreset> = [
   { id: "1080p", label: "1080p · 1920 x 1080", width: 1920, height: 1080 },
@@ -38,6 +39,10 @@ export const RENDER_FORMATS: ReadonlyArray<{ value: RenderFormat; label: string 
 
 export function isCreationMode(value: unknown): value is CreationMode {
   return value === "agent" || value === "manual";
+}
+
+export function isCreationTab(value: unknown): value is CreationTab {
+  return isCreationMode(value) || value === "render";
 }
 
 export function readStoredCreationMode(storage = browserStorage()): CreationMode | null {
@@ -67,6 +72,14 @@ export function resolveCreationMode(
   if (stored === "manual") return "manual";
   if (stored === "agent" && aiEnabled) return "agent";
   return aiEnabled ? DEFAULT_CREATION_MODE : "manual";
+}
+
+export function resolveCreationTab(
+  requested: CreationTab,
+  aiEnabled: boolean,
+): CreationTab {
+  if (requested === "render") return "render";
+  return resolveCreationMode(requested, aiEnabled);
 }
 
 export function normalizeDurationSec(value: unknown, fallback = DEFAULT_DURATION_SEC): number {

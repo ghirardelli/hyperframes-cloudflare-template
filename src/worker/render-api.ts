@@ -1823,7 +1823,7 @@ function msg(err: unknown): string {
 
 function normalizedDuration(durationSec: unknown): number | undefined {
   if (typeof durationSec !== "number" || Number.isNaN(durationSec)) return undefined;
-  return Math.max(1, Math.min(120, Math.round(durationSec)));
+  return Math.max(1, Math.min(300, Math.round(durationSec)));
 }
 
 function titleFromPrompt(prompt: string): string {

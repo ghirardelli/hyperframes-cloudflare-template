@@ -89,7 +89,7 @@ describe("render settings passthrough", () => {
 
   it("forwards chosen render settings to the render pipeline", async () => {
     const response = await handleWorkerApi(
-      renderRequest({ html: "<html></html>", width: 3840, height: 2160, durationSec: 10, format: "webm" }),
+      renderRequest({ html: "<html></html>", width: 3840, height: 2160, durationSec: 300, format: "webm" }),
       env,
     );
 
@@ -98,7 +98,7 @@ describe("render settings passthrough", () => {
     expect(mocks.containerBodies[0]).toMatchObject({
       width: 3840,
       height: 2160,
-      durationSec: 10,
+      durationSec: 300,
       format: "webm",
     });
     expect(mocks.containerBodies[0].files).toBeDefined();

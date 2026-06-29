@@ -42,8 +42,10 @@ import {
   renderFormatLabel,
   RENDER_FORMATS,
   resolveCreationMode,
+  resolveCreationTab,
   writeStoredCreationMode,
   type CreationMode,
+  type CreationTab,
   type ExportResolutionId,
   type RenderFormat,
 } from "@/lib/main-page-creation-flow";
@@ -97,7 +99,10 @@ const DEFAULT_PROMPT =
 function MotionFramesHome() {
   const playerRef = useRef<HTMLElement | null>(null);
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
-  const [creationMode, setCreationModeState] = useState<CreationMode>(
+  const [, setCreationModeState] = useState<CreationMode>(
+    () => readStoredCreationMode() ?? DEFAULT_CREATION_MODE,
+  );
+  const [activeCreationTab, setActiveCreationTab] = useState<CreationTab>(
     () => readStoredCreationMode() ?? DEFAULT_CREATION_MODE,
   );
   const [durationSec, setDurationSecState] = useState(DEFAULT_DURATION_SEC);
@@ -117,14 +122,17 @@ function MotionFramesHome() {
   const [renderUrl, setRenderUrl] = useState("");
   const [status, setStatus] = useState<{ tone: StatusTone; message: string }>({
     tone: "idle",
-    message: "Bundled composition loaded.",
+    message: "",
   });
 
   const activeSource = generatedHtml ? "Generated HTML" : "Bundled intro";
   const canGenerate = aiEnabled && prompt.trim().length > 0;
   const canRender = !isRendering && !isGenerating;
   const canUseAgentTab = isConfigReady && aiEnabled;
-  const activeCreationMode = creationMode === "agent" && !canUseAgentTab ? "manual" : creationMode;
+  const visibleCreationTab =
+    activeCreationTab === "agent" && !canUseAgentTab
+      ? "manual"
+      : resolveCreationTab(activeCreationTab, canUseAgentTab);
   const exportResolution = getExportResolutionPreset(exportResolutionId);
   const renderFormatName = renderFormatLabel(renderFormat);
   const durationOptions = useMemo(
@@ -163,9 +171,11 @@ function MotionFramesHome() {
 
   useEffect(() => {
     if (!isConfigReady) return;
-    setCreationModeState((current) =>
-      resolveCreationMode(readStoredCreationMode() ?? current, aiEnabled),
-    );
+    setCreationModeState((current) => {
+      const next = resolveCreationMode(readStoredCreationMode() ?? current, aiEnabled);
+      setActiveCreationTab((tab) => (tab === "render" ? tab : next));
+      return next;
+    });
   }, [aiEnabled, isConfigReady]);
 
   useEffect(() => {
@@ -196,9 +206,12 @@ function MotionFramesHome() {
     return "border-hairline bg-white text-body";
   }, [status.tone]);
 
-  function selectCreationMode(mode: CreationMode) {
-    setCreationModeState(mode);
-    writeStoredCreationMode(mode);
+  function selectCreationTab(tab: CreationTab) {
+    if (tab === "agent" && !canUseAgentTab) return;
+    setActiveCreationTab(tab);
+    if (tab === "render") return;
+    setCreationModeState(tab);
+    writeStoredCreationMode(tab);
   }
 
   const setDurationSec = useCallback((value: unknown) => {
@@ -295,7 +308,7 @@ function MotionFramesHome() {
     setRenderUrl("");
     setActiveProjectId("");
     setActiveProjectTitle("");
-    setStatus({ tone: "idle", message: "Bundled composition loaded." });
+    setStatus({ tone: "idle", message: "" });
   }
 
   if (!me) {
@@ -324,7 +337,7 @@ function MotionFramesHome() {
                   {activeProjectTitle || activeSource}
                 </Badge>
                 <Badge variant="outline" className="h-8 rounded-full px-3">
-                  {durationSec}s timeline
+                  {formatDurationOption(durationSec)} timeline
                 </Badge>
               </div>
             </div>
@@ -398,16 +411,16 @@ function MotionFramesHome() {
               <div
                 role="tablist"
                 aria-label="Creation mode"
-                className="grid grid-cols-2 gap-1 rounded-md bg-surface-card p-1"
+                className="grid grid-cols-3 gap-1 rounded-md bg-surface-card p-1"
               >
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={activeCreationMode === "agent"}
+                  aria-selected={visibleCreationTab === "agent"}
                   disabled={!canUseAgentTab}
-                  onClick={() => selectCreationMode("agent")}
+                  onClick={() => selectCreationTab("agent")}
                   className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                    activeCreationMode === "agent"
+                    visibleCreationTab === "agent"
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
@@ -418,10 +431,10 @@ function MotionFramesHome() {
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={activeCreationMode === "manual"}
-                  onClick={() => selectCreationMode("manual")}
+                  aria-selected={visibleCreationTab === "manual"}
+                  onClick={() => selectCreationTab("manual")}
                   className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold transition-colors ${
-                    activeCreationMode === "manual"
+                    visibleCreationTab === "manual"
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
@@ -429,34 +442,50 @@ function MotionFramesHome() {
                   <Sparkles className="h-4 w-4" aria-hidden="true" />
                   Manual Prompt
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={visibleCreationTab === "render"}
+                  onClick={() => selectCreationTab("render")}
+                  className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold transition-colors ${
+                    visibleCreationTab === "render"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Play className="h-4 w-4" aria-hidden="true" />
+                  Render
+                </button>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                <div className="space-y-2">
-                  <Label htmlFor="duration">Duration</Label>
-                  <div className="relative">
-                    <Clock3 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                    <select
-                      id="duration"
-                      value={durationSec}
-                      onChange={(event) => setDurationSec(event.target.value)}
-                      disabled={isGenerating || isRendering}
-                      className="h-10 w-full appearance-none rounded-md border border-input bg-background px-9 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {durationOptions.map((seconds) => (
-                        <option key={seconds} value={seconds}>
-                          {seconds} seconds
-                        </option>
-                      ))}
-                    </select>
+              {visibleCreationTab !== "render" ? (
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                  <div className="space-y-2">
+                    <Label htmlFor="duration">Duration</Label>
+                    <div className="relative">
+                      <Clock3 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                      <select
+                        id="duration"
+                        value={durationSec}
+                        onChange={(event) => setDurationSec(event.target.value)}
+                        disabled={isGenerating || isRendering}
+                        className="h-10 w-full appearance-none rounded-md border border-input bg-background px-9 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {durationOptions.map((seconds) => (
+                          <option key={seconds} value={seconds}>
+                            {formatDurationOption(seconds)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="rounded-md border border-hairline bg-surface-card px-3 py-2 text-sm text-muted-foreground">
+                    Duration is used before generation so the motion timing and final beat fit the timeline.
                   </div>
                 </div>
-                <div className="rounded-md border border-hairline bg-surface-card px-3 py-2 text-sm text-muted-foreground">
-                  Duration is used before generation so the motion timing and final beat fit the timeline.
-                </div>
-              </div>
+              ) : null}
 
-              {activeCreationMode === "agent" ? (
+              {visibleCreationTab === "agent" ? (
                 <PromptAgentPanel
                   prompt={prompt}
                   onPromptChange={setPrompt}
@@ -471,7 +500,9 @@ function MotionFramesHome() {
                   isRendering={isRendering}
                   onGenerated={applyAgentGeneration}
                 />
-              ) : (
+              ) : null}
+
+              {visibleCreationTab === "manual" ? (
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="prompt">Final generation prompt</Label>
@@ -498,99 +529,97 @@ function MotionFramesHome() {
                     Generate Preview
                   </Button>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Export</CardTitle>
-              <CardDescription>Render output settings</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="export-resolution">Resolution</Label>
-                  <select
-                    id="export-resolution"
-                    value={exportResolutionId}
-                    onChange={(event) => setExportResolutionId(event.target.value as ExportResolutionId)}
-                    disabled={isRendering}
-                    className="h-10 w-full rounded-md border border-input bg-background px-3.5 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {EXPORT_RESOLUTION_PRESETS.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="export-format">Format</Label>
-                  <select
-                    id="export-format"
-                    value={renderFormat}
-                    onChange={(event) => setRenderFormat(event.target.value as RenderFormat)}
-                    disabled={isRendering}
-                    className="h-10 w-full rounded-md border border-input bg-background px-3.5 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {RENDER_FORMATS.map((format) => (
-                      <option key={format.value} value={format.value}>
-                        {format.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                The HyperFrame canvas stays 1920 x 1080; export resolution controls the rendered output size.
-              </p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <Button
-                  type="button"
-                  className="w-full"
-                  variant="default"
-                  onClick={render}
-                  disabled={!canRender}
-                >
-                  {isRendering ? (
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  ) : (
-                    <Play className="h-4 w-4" aria-hidden="true" />
-                  )}
-                  Render {renderFormatName}
-                </Button>
-                <Button
-                  type="button"
-                  className="w-full"
-                  variant="outline"
-                  onClick={resetComposition}
-                  disabled={!generatedHtml || isRendering}
-                >
-                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                  Reset
-                </Button>
-              </div>
-              {renderUrl ? (
-                <Button asChild className="w-full" variant="secondary">
-                  <a href={renderUrl} target="_blank" rel="noreferrer">
-                    <Download className="h-4 w-4" aria-hidden="true" />
-                    Download {renderFormatName}
-                  </a>
-                </Button>
               ) : null}
-              <div className="rounded-md border border-hairline bg-surface-card px-3 py-2 text-xs text-muted-foreground">
-                Selected export: {exportResolution.width} x {exportResolution.height} {renderFormatName}
-              </div>
+
+              {visibleCreationTab === "render" ? (
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="export-resolution">Resolution</Label>
+                      <select
+                        id="export-resolution"
+                        value={exportResolutionId}
+                        onChange={(event) => setExportResolutionId(event.target.value as ExportResolutionId)}
+                        disabled={isRendering}
+                        className="h-10 w-full rounded-md border border-input bg-background px-3.5 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {EXPORT_RESOLUTION_PRESETS.map((preset) => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="export-format">Format</Label>
+                      <select
+                        id="export-format"
+                        value={renderFormat}
+                        onChange={(event) => setRenderFormat(event.target.value as RenderFormat)}
+                        disabled={isRendering}
+                        className="h-10 w-full rounded-md border border-input bg-background px-3.5 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {RENDER_FORMATS.map((format) => (
+                          <option key={format.value} value={format.value}>
+                            {format.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="rounded-md bg-surface-card px-3 py-2 text-sm text-muted-foreground">
+                    Render exports the current preview at {exportResolution.width} x {exportResolution.height} as {renderFormatName}. The generated timeline remains {formatDurationOption(durationSec)}.
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Button
+                      type="button"
+                      className="w-full"
+                      variant="default"
+                      onClick={render}
+                      disabled={!canRender}
+                    >
+                      {isRendering ? (
+                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Play className="h-4 w-4" aria-hidden="true" />
+                      )}
+                      Render {renderFormatName}
+                    </Button>
+                    <Button
+                      type="button"
+                      className="w-full"
+                      variant="outline"
+                      onClick={resetComposition}
+                      disabled={!generatedHtml || isRendering}
+                    >
+                      <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                      Reset
+                    </Button>
+                  </div>
+                  {renderUrl ? (
+                    <Button asChild className="w-full" variant="secondary">
+                      <a href={renderUrl} target="_blank" rel="noreferrer">
+                        <Download className="h-4 w-4" aria-hidden="true" />
+                        Download {renderFormatName}
+                      </a>
+                    </Button>
+                  ) : null}
+                  <div className="rounded-md border border-hairline bg-surface-card px-3 py-2 text-xs text-muted-foreground">
+                    Selected export: {exportResolution.width} x {exportResolution.height} {renderFormatName}
+                  </div>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 
-          <div className={`rounded-lg border p-3 text-sm ${statusClassName}`}>
-            <div className="flex items-start gap-2">
-              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              <span>{status.message}</span>
+          {status.message ? (
+            <div className={`rounded-lg border p-3 text-sm ${statusClassName}`}>
+              <div className="flex items-start gap-2">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{status.message}</span>
+              </div>
             </div>
-          </div>
+          ) : null}
         </aside>
       </section>
     </div>
@@ -600,6 +629,12 @@ function MotionFramesHome() {
 function formatDuration(durationMs: number | undefined): string {
   if (typeof durationMs !== "number") return "a moment";
   return `${Math.max(1, Math.round(durationMs / 1000))}s`;
+}
+
+function formatDurationOption(seconds: number): string {
+  if (seconds < 60) return `${seconds} seconds`;
+  const minutes = seconds / 60;
+  return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
 }
 
 function messageFromError(err: unknown): string {

@@ -12,7 +12,7 @@ import {
 export const promptAgentForwardedPropsSchema = z.object({
   projectId: z.string().trim().min(1).max(200).optional(),
   currentPrompt: z.string().max(8_000).optional(),
-  durationSec: z.number().min(1).max(120).optional(),
+  durationSec: z.number().min(1).max(300).optional(),
   activeProjectTitle: z.string().max(160).optional(),
 });
 
@@ -57,7 +57,7 @@ export const promptAgentResultSchema = z.object({
   assistantMessage: z.string().min(1).max(1_200),
   title: z.string().max(120),
   generationPrompt: z.string().max(8_000),
-  durationSec: z.number().min(1).max(120),
+  durationSec: z.number().min(1).max(300),
   creativeDirection: z.object({
     mood: z.string().max(120),
     palette: z.array(z.string().max(80)).max(8),
@@ -95,7 +95,7 @@ export const projectContextOutputSchema = z.object({
 export const draftPromptInputSchema = z.object({
   title: z.string().max(120),
   generationPrompt: z.string().min(1).max(8_000),
-  durationSec: z.number().min(1).max(120),
+  durationSec: z.number().min(1).max(300),
   assistantMessage: z.string().max(1_200).optional(),
 });
 
@@ -115,7 +115,7 @@ export const highlightAgentSectionOutputSchema = z.object({
 
 export const generateHyperframeInputSchema = z.object({
   prompt: z.string().min(1).max(8_000),
-  durationSec: z.number().min(1).max(120).optional(),
+  durationSec: z.number().min(1).max(300).optional(),
   projectId: z.string().trim().min(1).max(200).optional(),
   title: z.string().max(120).optional(),
 });

@@ -397,7 +397,7 @@ export default function StudioEditor({
           <input
             type="number"
             min={1}
-            max={120}
+            max={300}
             value={durationSec}
             onChange={(e) => setDurationSec(Number(e.target.value) || 1)}
             className="w-16 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"

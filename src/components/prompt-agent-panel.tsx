@@ -171,8 +171,14 @@ export function PromptAgentPanel({
     clear();
   }
 
+  const hasPromptPackage = Boolean(
+    promptPackage?.generationPrompt?.trim() ||
+      promptPackage?.assistantMessage ||
+      promptPackage?.hyperframesChecklist?.length,
+  );
+
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-[560px] flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-hairline bg-background px-3 py-2">
         <div>
           <div className="text-sm font-medium text-foreground">AI prompt agent</div>
@@ -185,8 +191,11 @@ export function PromptAgentPanel({
 
       <div
         className={cn(
-          "max-h-[280px] space-y-3 overflow-y-auto rounded-lg border border-hairline bg-background p-3",
+          "min-h-[320px] flex-1 space-y-3 overflow-y-auto rounded-md bg-surface-card p-3",
           focusedSection === "chat" && "ring-2 ring-primary/30",
+          focusedSection === "draft" && "ring-2 ring-primary/30",
+          focusedSection === "checklist" && "ring-2 ring-primary/30",
+          focusedSection === "approval" && "ring-2 ring-primary/30",
         )}
       >
         {messages.length ? (
@@ -199,78 +208,25 @@ export function PromptAgentPanel({
             />
           ))
         ) : (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <MessageCircle className="h-4 w-4" aria-hidden="true" />
-            <span>Ask for help turning a rough idea into a generation-ready prompt.</span>
+          <div className="grid min-h-40 place-items-center px-4 text-center text-sm text-muted-foreground">
+            <div>
+              <MessageCircle className="mx-auto mb-2 h-5 w-5" aria-hidden="true" />
+              <p>Ask for help turning a rough idea into a generation-ready prompt.</p>
+            </div>
           </div>
         )}
+        {hasPromptPackage ? (
+          <PromptPackageArtifact
+            promptPackage={promptPackage}
+            durationSec={durationSec}
+            onApply={applyPromptPackage}
+            canApply={hasPackagePrompt}
+          />
+        ) : null}
         {isLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             <span>Thinking...</span>
-          </div>
-        ) : null}
-      </div>
-
-      <div
-        className={cn(
-          "rounded-lg border border-hairline bg-surface-card p-3",
-          focusedSection === "draft" && "ring-2 ring-primary/30",
-        )}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-sm font-medium text-foreground">
-              {promptPackage?.title || "Suggested prompt"}
-            </div>
-            <div className="mt-0.5 text-xs text-muted-foreground">
-              {promptPackage?.durationSec
-                ? `${promptPackage.durationSec}s duration`
-                : `${durationSec}s selected duration`}
-            </div>
-          </div>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={applyPromptPackage}
-            disabled={!hasPackagePrompt}
-          >
-            <WandSparkles className="h-4 w-4" aria-hidden="true" />
-            Apply
-          </Button>
-        </div>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {promptPackage?.assistantMessage ||
-            "The agent's structured prompt package will appear here."}
-        </p>
-        {promptPackage?.generationPrompt ? (
-          <div className="mt-3 rounded-md border border-hairline bg-white p-3 text-sm text-body">
-            {promptPackage.generationPrompt}
-          </div>
-        ) : null}
-        {promptPackage?.hyperframesChecklist?.length ? (
-          <div
-            className={cn(
-              "mt-3 space-y-1",
-              focusedSection === "checklist" && "rounded-md ring-2 ring-primary/30",
-            )}
-          >
-            {promptPackage.hyperframesChecklist.slice(0, 5).map((item, index) => (
-              <div
-                key={`${item.label ?? "check"}-${index}`}
-                className="flex items-start gap-2 text-xs text-muted-foreground"
-              >
-                <Check
-                  className={cn(
-                    "mt-0.5 h-3.5 w-3.5 shrink-0",
-                    item.satisfied ? "text-emerald-600" : "text-muted-foreground",
-                  )}
-                  aria-hidden="true"
-                />
-                <span>{item.label || item.notes || "HyperFrames check"}</span>
-              </div>
-            ))}
           </div>
         ) : null}
       </div>
@@ -281,11 +237,12 @@ export function PromptAgentPanel({
         </div>
       ) : null}
 
-      <div className="space-y-2">
+      <div className="mt-auto space-y-2 border-t border-hairline pt-3">
         <div className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
           Ask the agent
         </div>
         <Textarea
+          aria-label="Ask the agent"
           value={agentInput}
           onChange={(event) => setAgentInput(event.target.value)}
           rows={3}
@@ -329,6 +286,77 @@ export function PromptAgentPanel({
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function PromptPackageArtifact({
+  promptPackage,
+  durationSec,
+  onApply,
+  canApply,
+}: {
+  promptPackage: PromptAgentPartialResult | null;
+  durationSec: number;
+  onApply: () => void;
+  canApply: boolean;
+}) {
+  const packageDuration = promptPackage?.durationSec ?? durationSec;
+  const prompt = promptPackage?.generationPrompt?.trim();
+
+  return (
+    <div className="rounded-md border border-hairline bg-white p-3 text-sm text-body shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+            Proposed prompt
+          </div>
+          <div className="mt-1 font-medium text-foreground">
+            {promptPackage?.title || "Generation-ready draft"}
+          </div>
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            {formatDurationLabel(packageDuration)} duration
+          </div>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={onApply}
+          disabled={!canApply}
+        >
+          <WandSparkles className="h-4 w-4" aria-hidden="true" />
+          Apply
+        </Button>
+      </div>
+      <p className="mt-2 text-sm text-muted-foreground">
+        {promptPackage?.assistantMessage ||
+          "Review this proposed HyperFrame prompt. If it looks right, apply it or approve generation in the chat."}
+      </p>
+      {prompt ? (
+        <div className="mt-3 rounded-md bg-surface-card p-3 text-sm text-body">
+          {prompt}
+        </div>
+      ) : null}
+      {promptPackage?.hyperframesChecklist?.length ? (
+        <div className="mt-3 space-y-1">
+          {promptPackage.hyperframesChecklist.slice(0, 5).map((item, index) => (
+            <div
+              key={`${item.label ?? "check"}-${index}`}
+              className="flex items-start gap-2 text-xs text-muted-foreground"
+            >
+              <Check
+                className={cn(
+                  "mt-0.5 h-3.5 w-3.5 shrink-0",
+                  item.satisfied ? "text-emerald-600" : "text-muted-foreground",
+                )}
+                aria-hidden="true"
+              />
+              <span>{item.label || item.notes || "HyperFrames check"}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -396,7 +424,7 @@ function AgentMessage({
                     onClick={() => onApprove(approvalId)}
                   >
                     <Check className="h-4 w-4" aria-hidden="true" />
-                    Approve
+                    {part.name === "generate_hyperframe" ? "Approve & Generate" : "Approve"}
                   </Button>
                   <Button
                     type="button"
@@ -421,6 +449,12 @@ function normalizePartialResult(
   value: PromptAgentPartialResult,
 ): PromptAgentPartialResult | null {
   return value && Object.keys(value).length ? value : null;
+}
+
+function formatDurationLabel(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = seconds / 60;
+  return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
 }
 
 function looksLikeJson(value: string): boolean {

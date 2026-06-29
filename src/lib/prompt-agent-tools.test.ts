@@ -82,6 +82,9 @@ describe("prompt agent server tools", () => {
       validPromptPackage,
     );
     await expect(
+      tool.execute({ ...validPromptPackage, durationSec: 300 }, { context: runtime() } as never),
+    ).resolves.toMatchObject({ durationSec: 300 });
+    await expect(
       tool.execute({ ...validPromptPackage, durationSec: 999 }, { context: runtime() } as never),
     ).rejects.toThrow();
   });
@@ -178,12 +181,12 @@ describe("prompt agent server tools", () => {
 
     await tool.execute(
       { prompt: "Launch" },
-      { context: runtime(generateHyperframe, 10) } as never,
+      { context: runtime(generateHyperframe, 300) } as never,
     );
 
     expect(generateHyperframe).toHaveBeenCalledWith({
       prompt: "Launch",
-      durationSec: 10,
+      durationSec: 300,
       projectId: "project-1",
       title: undefined,
     });

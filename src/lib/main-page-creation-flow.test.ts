@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   CREATION_MODE_STORAGE_KEY,
+  DURATION_PRESETS,
   buildRenderRequestBody,
   getExportResolutionPreset,
   normalizeDurationSec,
   readStoredCreationMode,
   resolveCreationMode,
+  resolveCreationTab,
   writeStoredCreationMode,
 } from "./main-page-creation-flow";
 
@@ -44,8 +46,23 @@ describe("main page creation flow helpers", () => {
   it("normalizes duration into the generation-supported range", () => {
     expect(normalizeDurationSec("8")).toBe(8);
     expect(normalizeDurationSec(0)).toBe(1);
-    expect(normalizeDurationSec(999)).toBe(120);
+    expect(normalizeDurationSec(999)).toBe(300);
     expect(normalizeDurationSec("not a number", 10)).toBe(10);
+  });
+
+  it("includes long duration presets through five minutes", () => {
+    expect(DURATION_PRESETS).toEqual(
+      expect.arrayContaining([30, 60, 120, 180, 240, 300]),
+    );
+  });
+
+  it("does not treat Render as a persisted creation mode", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(CREATION_MODE_STORAGE_KEY, "render");
+
+    expect(readStoredCreationMode(storage)).toBeNull();
+    expect(resolveCreationTab("render", false)).toBe("render");
+    expect(resolveCreationTab("agent", false)).toBe("manual");
   });
 
   it("builds render request bodies from export presets and format", () => {
