@@ -94,8 +94,8 @@ function AdminPage() {
 
   if (!canAdmin) {
     return (
-      <main className="min-h-screen bg-[#f5f5f7] px-6 py-10 text-[#1d1d1f]">
-        <div className="mx-auto max-w-4xl">
+      <main className="min-h-dvh bg-[#f5f5f7] px-4 py-10 text-[#1d1d1f] sm:px-6 lg:px-8">
+        <div className="mx-auto w-full max-w-3xl">
           <TopLinks />
           <p className="mt-16 text-2xl font-semibold">{status || "Checking access..."}</p>
         </div>
@@ -104,8 +104,8 @@ function AdminPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f5f7] px-6 py-10 text-[#1d1d1f]">
-      <div className="mx-auto max-w-6xl space-y-8">
+    <main className="min-h-dvh bg-[#f5f5f7] px-4 py-10 text-[#1d1d1f] sm:px-6 lg:px-8">
+      <div className="w-full space-y-8">
         <TopLinks />
         <header>
           <p className="text-sm text-[#0066cc]">Admin</p>

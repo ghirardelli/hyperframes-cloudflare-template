@@ -15,3 +15,4 @@ worker-configuration.d.ts
 src/composition-manifest.json
 public/_bundled/
 public/_hyperframes/
+public/_studio/

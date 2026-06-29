@@ -85,6 +85,22 @@ async function copyPlayer() {
   await copyIfChanged(src, dest);
 }
 
+// The Studio editor components ship a prebuilt (Tailwind v3) stylesheet under a
+// hash-named asset. The package `exports` map blocks deep CSS imports, so we copy
+// it to a stable public path and load it via a route-scoped <link> on the Studio
+// route only (keeps its preflight out of the rest of the Tailwind v4 app).
+async function copyStudioCss() {
+  const assetsDir = "node_modules/@hyperframes/studio/dist/assets";
+  const entries = await readdir(assetsDir);
+  const cssFile = entries.find((name) => name.endsWith(".css"));
+  if (!cssFile) {
+    console.warn("[build] no @hyperframes/studio CSS asset found; skipping");
+    return;
+  }
+  await copyIfChanged(join(assetsDir, cssFile), "public/_studio/studio.css");
+}
+
 await writeManifest();
 await bundlePreview();
 await copyPlayer();
+await copyStudioCss();

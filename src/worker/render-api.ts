@@ -174,6 +174,52 @@ function htmlToFiles(html: string): Array<{ path: string; content: string }> {
 interface RenderRequestBody {
   html?: string;
   projectId?: string;
+  width?: number;
+  height?: number;
+  durationSec?: number;
+  format?: string;
+}
+
+interface RenderSettings {
+  width?: number;
+  height?: number;
+  durationSec?: number;
+  format?: string;
+}
+
+const RENDER_FORMATS = new Set(["mp4", "webm", "mov"]);
+
+/**
+ * Validate optional render settings from the request body. Returns a settings
+ * object (possibly empty, preserving default render behavior) or a Response on
+ * invalid input.
+ */
+function parseRenderSettings(body: RenderRequestBody | null): RenderSettings | Response {
+  const settings: RenderSettings = {};
+  if (body?.width !== undefined) {
+    if (typeof body.width !== "number" || !Number.isFinite(body.width) || body.width < 16 || body.width > 4096) {
+      return jsonError("width must be between 16 and 4096", 400);
+    }
+    settings.width = Math.round(body.width);
+  }
+  if (body?.height !== undefined) {
+    if (typeof body.height !== "number" || !Number.isFinite(body.height) || body.height < 16 || body.height > 4096) {
+      return jsonError("height must be between 16 and 4096", 400);
+    }
+    settings.height = Math.round(body.height);
+  }
+  if (body?.durationSec !== undefined) {
+    const d = normalizedDuration(body.durationSec);
+    if (d === undefined) return jsonError("durationSec must be a number", 400);
+    settings.durationSec = d;
+  }
+  if (body?.format !== undefined) {
+    if (typeof body.format !== "string" || !RENDER_FORMATS.has(body.format)) {
+      return jsonError("format must be one of mp4, webm, mov", 400);
+    }
+    settings.format = body.format;
+  }
+  return settings;
 }
 
 async function handleRender(
@@ -217,6 +263,9 @@ async function handleRender(
     }
   }
 
+  const settings = parseRenderSettings(body);
+  if (settings instanceof Response) return settings;
+
   const container = getContainer(env.RENDER_CONTAINER, "renderer");
   let containerRes;
   try {
@@ -224,7 +273,7 @@ async function handleRender(
       new Request("http://container/render", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ files }),
+        body: JSON.stringify({ files, ...settings }),
       }),
     );
   } catch (err) {
@@ -425,6 +474,20 @@ async function handleAppApi(
       if (tenant) return tenant;
       if (req.method === "GET") return await handleGetProject(env, auth, projectMatch[1]);
       if (req.method === "PATCH") return await handleUpdateProject(env, req, auth, projectMatch[1]);
+    }
+
+    const projectPreviewMatch = pathname.match(/^\/api\/projects\/([^/]+)\/preview$/);
+    if (projectPreviewMatch && req.method === "GET") {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      return await handleProjectPreview(env, auth, projectPreviewMatch[1]);
+    }
+
+    const projectRendersMatch = pathname.match(/^\/api\/projects\/([^/]+)\/renders$/);
+    if (projectRendersMatch && req.method === "GET") {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      return await handleListProjectRenders(env, auth, projectRendersMatch[1]);
     }
 
     const projectPublishMatch = pathname.match(/^\/api\/projects\/([^/]+)\/publish$/);
@@ -645,6 +708,50 @@ async function handleGetProject(
 ): Promise<Response> {
   const project = await requireProjectAccess(context, projectId, env);
   return Response.json({ project });
+}
+
+/**
+ * Serve a project's composition as a standalone document for the Studio
+ * preview iframe (`Player` directUrl). Generated compositions already embed
+ * the GSAP + HyperFrames runtime, so no injection is needed. Organization
+ * access is enforced by requireProjectAccess.
+ */
+async function handleProjectPreview(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  projectId: string,
+): Promise<Response> {
+  const project = await requireProjectAccess(context, projectId, env);
+  const html =
+    project.currentHtml ||
+    "<!doctype html><html><head><meta charset=\"utf-8\"><title>No composition</title></head><body></body></html>";
+  return new Response(html, { headers: PREVIEW_HEADERS });
+}
+
+/**
+ * List a project's renders for the Studio renders panel, scoped to the user's
+ * organization (requireProjectAccess enforces ownership).
+ */
+async function handleListProjectRenders(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  projectId: string,
+): Promise<Response> {
+  await requireProjectAccess(context, projectId, env);
+  const rows = await createDb(env)
+    .select()
+    .from(renders)
+    .where(
+      and(eq(renders.projectId, projectId), eq(renders.organizationId, context.organization.id)),
+    )
+    .orderBy(desc(renders.createdAt));
+  const items = rows.map((r) => ({
+    id: r.id,
+    url: `/r/${r.r2Key}`,
+    format: r.sourceType,
+    createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+  }));
+  return Response.json({ renders: items });
 }
 
 async function handleUpdateProject(

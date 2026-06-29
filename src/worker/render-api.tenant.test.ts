@@ -274,6 +274,63 @@ describe("tenant-aware worker APIs", () => {
     await expect(response?.json()).resolves.toEqual({ error: "organization access denied" });
   });
 
+  it("serves a project preview to a same-organization member", async () => {
+    apiMocks.requireAuthContext.mockResolvedValue(memberContext);
+    apiMocks.selectRows = [
+      [{ id: "project-1", organizationId: "org-1", currentHtml: "<html><body>preview-body</body></html>" }],
+    ];
+
+    const response = await handleWorkerApi(
+      new Request("https://motion-frames.test/api/projects/project-1/preview"),
+      baseEnv,
+    );
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("content-type")).toContain("text/html");
+    await expect(response?.text()).resolves.toContain("preview-body");
+  });
+
+  it("persists Studio source edits and records a version", async () => {
+    apiMocks.requireAuthContext.mockResolvedValue(memberContext);
+    // requireProjectAccess lookup, then update().returning()
+    apiMocks.selectRows = [[{ id: "project-1", organizationId: "org-1" }]];
+    apiMocks.returningRows = [[{ id: "project-1", currentHtml: "<h1>edited</h1>" }]];
+
+    const response = await handleWorkerApi(
+      new Request("https://motion-frames.test/api/projects/project-1", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>edited</h1>" }),
+      }),
+      baseEnv,
+    );
+
+    expect(response?.status).toBe(200);
+    expect(apiMocks.updates[0]?.values).toMatchObject({ currentHtml: "<h1>edited</h1>" });
+    expect(apiMocks.inserts).toContainEqual(
+      expect.objectContaining({
+        values: expect.objectContaining({
+          projectId: "project-1",
+          organizationId: "org-1",
+          html: "<h1>edited</h1>",
+        }),
+      }),
+    );
+  });
+
+  it("denies cross-organization project preview", async () => {
+    apiMocks.requireAuthContext.mockResolvedValue(memberContext);
+    apiMocks.selectRows = [[{ id: "project-9", organizationId: "org-2" }]];
+
+    const response = await handleWorkerApi(
+      new Request("https://motion-frames.test/api/projects/project-9/preview"),
+      baseEnv,
+    );
+
+    expect(response?.status).toBe(403);
+    await expect(response?.json()).resolves.toEqual({ error: "organization access denied" });
+  });
+
   it("does not serve cross-organization render objects", async () => {
     apiMocks.requireAuthContext.mockResolvedValue(memberContext);
     apiMocks.selectRows = [[{ organizationId: "org-2" }]];

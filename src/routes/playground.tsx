@@ -52,8 +52,8 @@ function PlaygroundPage() {
   const items = [...examples, ...publishedProjects];
 
   return (
-    <main className="min-h-screen bg-white px-6 py-10 text-[#1d1d1f]">
-      <div className="mx-auto max-w-6xl space-y-10">
+    <main className="min-h-dvh bg-white px-4 py-10 text-[#1d1d1f] sm:px-6 lg:px-8">
+      <div className="w-full space-y-10">
         <nav className="flex flex-wrap gap-2 text-sm">
           <Button asChild variant="secondary" size="sm">
             <a href="/">Workspace</a>
@@ -71,7 +71,7 @@ function PlaygroundPage() {
           </p>
         </header>
 
-        <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+        <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {items.map((item) => (
             <article key={item.id} className="rounded-[18px] border border-stone-200 bg-[#f5f5f7] p-5">
               <div className="mb-5 aspect-video rounded-[12px] bg-[#252527]" />

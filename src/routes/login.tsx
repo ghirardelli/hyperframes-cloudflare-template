@@ -55,8 +55,8 @@ function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-[#1d1d1f]">
-      <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[minmax(420px,0.9fr)_minmax(0,1.35fr)]">
+    <main className="min-h-dvh bg-white text-[#1d1d1f]">
+      <div className="grid min-h-dvh grid-cols-1 lg:grid-cols-[minmax(420px,0.9fr)_minmax(0,1.35fr)]">
         <section className="flex items-center px-6 py-10 sm:px-10 lg:px-16">
           <div className="mx-auto w-full max-w-[520px]">
             <a className="mb-16 inline-flex items-center gap-2 text-sm text-stone-700" href="/">
@@ -111,7 +111,7 @@ function LoginPage() {
           </div>
         </section>
 
-        <section className="hidden min-h-screen items-center overflow-hidden bg-[#f5f5f7] p-8 lg:flex">
+        <section className="hidden min-h-dvh items-center overflow-hidden bg-[#f5f5f7] p-8 lg:flex">
           <WorkspacePreview />
         </section>
       </div>
