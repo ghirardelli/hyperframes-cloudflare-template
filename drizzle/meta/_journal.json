@@ -22,6 +22,13 @@
       "when": 1782699630020,
       "tag": "0002_messy_silver_fox",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782714902842,
+      "tag": "0003_aromatic_magneto",
+      "breakpoints": true
     }
   ]
 }

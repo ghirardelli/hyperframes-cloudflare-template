@@ -98,4 +98,32 @@ describe("Better Auth configuration", () => {
       "https://admin.example.com",
     ]);
   });
+
+  it("uses Cloudflare visitor IPs for auth rate limiting", () => {
+    createAuth({
+      DATABASE_URL: "postgresql://example",
+      BETTER_AUTH_SECRET: "secret",
+      BETTER_AUTH_URL: "https://motion-frames.test",
+    });
+
+    const config = authMocks.betterAuth.mock.calls.at(-1)?.[0];
+    expect(config.advanced?.ipAddress).toEqual({
+      ipAddressHeaders: ["cf-connecting-ip"],
+    });
+  });
+
+  it("persists rate limit counters in the database", () => {
+    createAuth({
+      DATABASE_URL: "postgresql://example",
+      BETTER_AUTH_SECRET: "secret",
+      BETTER_AUTH_URL: "https://motion-frames.test",
+    });
+
+    const config = authMocks.betterAuth.mock.calls.at(-1)?.[0];
+    expect(config.rateLimit).toMatchObject({
+      enabled: true,
+      storage: "database",
+      modelName: "rateLimit",
+    });
+  });
 });

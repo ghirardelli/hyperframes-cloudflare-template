@@ -30,6 +30,16 @@ export function createAuth(env: AuthEnv) {
       schema,
       usePlural: true,
     }),
+    advanced: {
+      ipAddress: {
+        ipAddressHeaders: ["cf-connecting-ip"],
+      },
+    },
+    rateLimit: {
+      enabled: true,
+      storage: "database",
+      modelName: "rateLimit",
+    },
     emailAndPassword: {
       enabled: true,
       disableSignUp: true,
