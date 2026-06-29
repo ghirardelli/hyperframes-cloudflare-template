@@ -28,7 +28,23 @@ function LoginPage() {
       });
       if (!response.ok) {
         const data = (await response.json().catch(() => ({}))) as { message?: string; error?: string };
-        throw new Error(data.message || data.error || "Unable to sign in.");
+        const message = data.message || data.error || "Unable to sign in.";
+        if (message.toLowerCase().includes("invalid email or password")) {
+          throw new Error(
+            "Invalid email or password. If this user was created in Better Auth Dash, make sure a password is set for the account.",
+          );
+        }
+        throw new Error(message);
+      }
+
+      const profile = await fetch("/api/me", { headers: { accept: "application/json" } });
+      if (!profile.ok) {
+        const data = (await profile.json().catch(() => ({}))) as { message?: string; error?: string };
+        throw new Error(
+          data.message ||
+            data.error ||
+            "Sign-in succeeded, but this account is not assigned to a Motion Frames organization. Ask an admin to invite the user from the Motion Frames admin page.",
+        );
       }
       window.location.assign("/");
     } catch (err) {
