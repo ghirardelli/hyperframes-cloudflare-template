@@ -255,7 +255,6 @@ export const projectEntries = pgTable(
       table.organizationId,
       table.projectId,
     ),
-    searchIdx: index("project_entries_search_idx").on(table.searchText),
   }),
 );
 
@@ -322,6 +321,43 @@ export const projectSnapshots = pgTable(
       table.projectId,
       table.createdAt,
     ),
+  }),
+);
+
+export const workflowRuns = pgTable(
+  "workflow_runs",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
+    skillId: text("skill_id").notNull(),
+    status: text("status").notNull().default("queued"),
+    phase: text("phase").notNull().default("preflight"),
+    inputUrl: text("input_url").notNull(),
+    options: jsonb("options").$type<Record<string, unknown>>(),
+    progress: jsonb("progress").$type<Record<string, unknown>>(),
+    artifactManifest: jsonb("artifact_manifest").$type<Record<string, unknown>>(),
+    error: jsonb("error").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { mode: "date" }),
+    completedAt: timestamp("completed_at", { mode: "date" }),
+  },
+  (table) => ({
+    orgCreatedIdx: index("workflow_runs_org_created_idx").on(
+      table.organizationId,
+      table.createdAt,
+    ),
+    orgStatusIdx: index("workflow_runs_org_status_idx").on(
+      table.organizationId,
+      table.status,
+    ),
+    projectIdx: index("workflow_runs_project_idx").on(table.projectId),
   }),
 );
 

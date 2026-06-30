@@ -2,6 +2,9 @@ import { requireProjectAccess, type AppAuthContext } from "./auth-context";
 import { getHyperframesGuidelines, summarizeHtmlForAgent } from "./hyperframes-guidance";
 import {
   generateHyperframeTool,
+  cancelHyperframesWorkflowTool,
+  continueHyperframesWorkflowTool,
+  getHyperframesWorkflowRunTool,
   getHyperframesGuidelinesTool,
   inspectProjectContextTool,
   listHyperframesSkillCatalogTool,
@@ -9,6 +12,7 @@ import {
   preparePromptPackageTool,
   promptAgentResultSchema,
   routeHyperframesWorkflowTool,
+  startHyperframesWorkflowTool,
   type GenerateHyperframeOutput,
 } from "./prompt-agent-contract";
 import {
@@ -17,6 +21,12 @@ import {
   routeHyperframesWorkflow,
 } from "./hyperframes-skill-catalog";
 import type { WorkerEnv } from "../worker/render-api";
+import {
+  cancelWebsiteToVideoWorkflowRun,
+  continueWebsiteToVideoWorkflowRun,
+  getWebsiteToVideoWorkflowRun,
+  startWebsiteToVideoWorkflowRun,
+} from "../worker/workflow-api";
 
 export interface PromptAgentToolContext {
   env: WorkerEnv;
@@ -81,6 +91,27 @@ export function createPromptAgentServerTools() {
         projectId: args.projectId || runtime.forwardedProjectId,
         title: args.title,
       });
+    }),
+    startHyperframesWorkflowTool.server(async (args, execution) => {
+      const runtime = requireRuntimeContext(execution?.context as PromptAgentToolContext | undefined);
+      return startWebsiteToVideoWorkflowRun(runtime.env, runtime.auth, {
+        url: args.url,
+        title: args.title,
+        durationSec: args.durationSec ?? runtime.forwardedDurationSec,
+        projectId: args.projectId || runtime.forwardedProjectId,
+      });
+    }),
+    getHyperframesWorkflowRunTool.server(async (args, execution) => {
+      const runtime = requireRuntimeContext(execution?.context as PromptAgentToolContext | undefined);
+      return getWebsiteToVideoWorkflowRun(runtime.env, runtime.auth, args.runId);
+    }),
+    continueHyperframesWorkflowTool.server(async (args, execution) => {
+      const runtime = requireRuntimeContext(execution?.context as PromptAgentToolContext | undefined);
+      return continueWebsiteToVideoWorkflowRun(runtime.env, runtime.auth, args.runId);
+    }),
+    cancelHyperframesWorkflowTool.server(async (args, execution) => {
+      const runtime = requireRuntimeContext(execution?.context as PromptAgentToolContext | undefined);
+      return cancelWebsiteToVideoWorkflowRun(runtime.env, runtime.auth, args.runId);
     }),
   ] as const;
 }

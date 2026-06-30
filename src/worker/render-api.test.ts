@@ -30,6 +30,7 @@ describe("handleWorkerApi", () => {
     expect(response?.headers.get("cache-control")).toBe("public, max-age=300");
     await expect(response?.json()).resolves.toEqual({
       aiGenEnabled: true,
+      websiteToVideoWorkflowEnabled: false,
       modelLabel: "google/gemini-3-flash-preview",
     });
   });

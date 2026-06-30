@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   findLatestGeneratedHyperframe,
+  findLatestWorkflowRun,
   formatAgentToolState,
   promptAgentToolLabel,
   safePreview,
@@ -15,6 +16,40 @@ const generatedOutput = {
   durationMs: 50,
   lintOk: true,
   lintErrors: [],
+};
+
+const workflowOutput = {
+  id: "run-1",
+  projectId: "project-1",
+  skillId: "website-to-video",
+  status: "succeeded",
+  phase: "complete",
+  inputUrl: "https://example.com/",
+  options: {},
+  progress: { current: 6, total: 6, label: "Complete" },
+  artifactManifest: {
+    runId: "run-1",
+    skillId: "website-to-video",
+    artifacts: [
+      {
+        path: "pipeline/website-to-video/run-1/DESIGN.md",
+        role: "design",
+        contentType: "text/markdown; charset=utf-8",
+        size: 120,
+        storage: { provider: "bunny-storage", key: "orgs/org-1/users/user-1/projects/project-1/workspace/pipeline/website-to-video/run-1/DESIGN.md" },
+      },
+    ],
+    skippedSteps: [{ id: "voice", label: "Voice", reason: "Not configured" }],
+    studioUrl: "/projects/project-1/studio",
+  },
+  artifacts: [],
+  skippedSteps: [{ id: "voice", label: "Voice", reason: "Not configured" }],
+  error: null,
+  studioUrl: "/projects/project-1/studio",
+  createdAt: "2026-06-29T12:00:00.000Z",
+  updatedAt: "2026-06-29T12:01:00.000Z",
+  startedAt: null,
+  completedAt: "2026-06-29T12:01:00.000Z",
 };
 
 describe("prompt agent client helpers", () => {
@@ -78,8 +113,26 @@ describe("prompt agent client helpers", () => {
     expect(match).toEqual({ key: "tool-result:call-2", output: generatedOutput });
   });
 
+  it("finds the latest workflow run output from workflow tool calls", () => {
+    const match = findLatestWorkflowRun([
+      {
+        parts: [
+          {
+            type: "tool-call",
+            id: "workflow-call-1",
+            name: "start_hyperframes_workflow",
+            output: workflowOutput,
+          },
+        ],
+      },
+    ]);
+
+    expect(match).toEqual({ key: "tool-call:workflow-call-1", output: workflowOutput });
+  });
+
   it("formats tool names, states, and previews for compact UI rendering", () => {
     expect(promptAgentToolLabel("generate_hyperframe")).toBe("Generate HyperFrame");
+    expect(promptAgentToolLabel("start_hyperframes_workflow")).toBe("Start workflow");
     expect(promptAgentToolLabel("list_hyperframes_skill_catalog")).toBe("Skill catalog");
     expect(promptAgentToolLabel("route_hyperframes_workflow")).toBe("Workflow route");
     expect(promptAgentToolLabel("load_hyperframes_skill")).toBe("Load skill");

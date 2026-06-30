@@ -1,4 +1,9 @@
-import { generateHyperframeOutputSchema, type GenerateHyperframeOutput } from "./prompt-agent-contract";
+import {
+  generateHyperframeOutputSchema,
+  workflowRunClientSchema,
+  type GenerateHyperframeOutput,
+} from "./prompt-agent-contract";
+import type { z } from "zod";
 
 type MessageLike = {
   parts?: Array<unknown>;
@@ -22,6 +27,13 @@ export interface GeneratedHyperframeMatch {
   output: GenerateHyperframeOutput;
 }
 
+export type WorkflowRunOutput = z.infer<typeof workflowRunClientSchema>;
+
+export interface WorkflowRunMatch {
+  key: string;
+  output: WorkflowRunOutput;
+}
+
 export function findLatestGeneratedHyperframe(
   messages: Array<MessageLike>,
   appliedKeys: ReadonlySet<string>,
@@ -34,6 +46,22 @@ export function findLatestGeneratedHyperframe(
 
       const result = parseGenerateToolResult(part);
       if (result && !appliedKeys.has(result.key)) return result;
+    }
+  }
+  return null;
+}
+
+export function findLatestWorkflowRun(
+  messages: Array<MessageLike>,
+): WorkflowRunMatch | null {
+  for (const message of [...messages].reverse()) {
+    const parts = message.parts ?? [];
+    for (const part of [...parts].reverse()) {
+      const direct = parseWorkflowToolCall(part);
+      if (direct) return direct;
+
+      const result = parseWorkflowToolResult(part);
+      if (result) return result;
     }
   }
   return null;
@@ -55,6 +83,14 @@ export function promptAgentToolLabel(name: string): string {
       return "Prompt package";
     case "generate_hyperframe":
       return "Generate HyperFrame";
+    case "start_hyperframes_workflow":
+      return "Start workflow";
+    case "get_hyperframes_workflow_run":
+      return "Workflow status";
+    case "continue_hyperframes_workflow":
+      return "Continue workflow";
+    case "cancel_hyperframes_workflow":
+      return "Cancel workflow";
     case "set_draft_prompt":
       return "Apply draft prompt";
     case "highlight_agent_section":
@@ -97,9 +133,21 @@ function parseGenerateToolCall(part: unknown): GeneratedHyperframeMatch | null {
   return output ? { key: `tool-call:${part.id}`, output } : null;
 }
 
+function parseWorkflowToolCall(part: unknown): WorkflowRunMatch | null {
+  if (!isToolCallLike(part) || !isWorkflowToolName(part.name)) return null;
+  const output = parseWorkflowRunOutput(part.output);
+  return output ? { key: `tool-call:${part.id}`, output } : null;
+}
+
 function parseGenerateToolResult(part: unknown): GeneratedHyperframeMatch | null {
   if (!isToolResultLike(part)) return null;
   const output = parseGenerateOutput(part.content);
+  return output ? { key: `tool-result:${part.toolCallId}`, output } : null;
+}
+
+function parseWorkflowToolResult(part: unknown): WorkflowRunMatch | null {
+  if (!isToolResultLike(part)) return null;
+  const output = parseWorkflowRunOutput(part.content);
   return output ? { key: `tool-result:${part.toolCallId}`, output } : null;
 }
 
@@ -115,6 +163,28 @@ function parseGenerateOutput(value: unknown): GenerateHyperframeOutput | null {
   if (Array.isArray(value)) return null;
   const parsed = generateHyperframeOutputSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
+}
+
+function parseWorkflowRunOutput(value: unknown): WorkflowRunOutput | null {
+  if (typeof value === "string") {
+    try {
+      return parseWorkflowRunOutput(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
+  if (Array.isArray(value)) return null;
+  const parsed = workflowRunClientSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function isWorkflowToolName(name: string): boolean {
+  return (
+    name === "start_hyperframes_workflow" ||
+    name === "get_hyperframes_workflow_run" ||
+    name === "continue_hyperframes_workflow" ||
+    name === "cancel_hyperframes_workflow"
+  );
 }
 
 function isToolCallLike(value: unknown): value is ToolCallLike {

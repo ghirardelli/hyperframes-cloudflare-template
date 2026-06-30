@@ -28,3 +28,16 @@ describe("project_files migration backfill", () => {
     expect(sql).not.toMatch(/INSERT INTO "published_projects"/);
   });
 });
+
+describe("project_entries migration backfill", () => {
+  const sql = readFileSync(
+    new URL("../../drizzle/0004_bright_mandarin.sql", import.meta.url),
+    "utf8",
+  );
+
+  it("does not create a btree index on large search_text content", () => {
+    expect(sql).toMatch(/"search_text" text/);
+    expect(sql).not.toMatch(/CREATE INDEX "project_entries_search_idx"/);
+    expect(sql).not.toMatch(/USING btree \("search_text"\)/);
+  });
+});

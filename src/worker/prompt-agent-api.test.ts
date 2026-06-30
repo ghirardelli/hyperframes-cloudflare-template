@@ -201,12 +201,14 @@ describe("prompt agent worker route", () => {
     const chatConfig = apiMocks.chat.mock.calls[0][0];
     expect(chatConfig.systemPrompts[0]).toContain("route_hyperframes_workflow");
     expect(chatConfig.systemPrompts[0]).toContain("fullPipelineAvailable=false");
-    expect(chatConfig.systemPrompts[0]).toContain("must not claim website capture");
+    expect(chatConfig.systemPrompts[0]).toContain("do not claim website capture");
     expect(chatConfig.tools.map((tool: { name: string }) => tool.name)).toEqual(
       expect.arrayContaining([
         "list_hyperframes_skill_catalog",
         "route_hyperframes_workflow",
         "load_hyperframes_skill",
+        "start_hyperframes_workflow",
+        "get_hyperframes_workflow_run",
         "generate_hyperframe",
       ]),
     );

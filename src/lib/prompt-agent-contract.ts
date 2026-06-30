@@ -69,6 +69,7 @@ export const promptAgentResultSchema = z.object({
     "ask_follow_up",
     "apply_prompt",
     "generate_after_approval",
+    "start_workflow_after_approval",
     "manual_generate",
     "none",
   ]),
@@ -138,6 +139,84 @@ export const generateHyperframeOutputSchema = z.object({
 
 export type GenerateHyperframeOutput = z.infer<typeof generateHyperframeOutputSchema>;
 
+const workflowProgressSchema = z.object({
+  current: z.number(),
+  total: z.number(),
+  label: z.string(),
+});
+
+const workflowSkippedStepSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  reason: z.string(),
+});
+
+const workflowStoragePointerSchema = z.object({
+  provider: z.enum(["postgres", "r2", "bunny-storage", "bunny-stream"]),
+  key: z.string().nullable(),
+  sha256: z.string().nullable().optional(),
+  streamLibraryId: z.string().nullable().optional(),
+  streamVideoId: z.string().nullable().optional(),
+  streamStatus: z.string().nullable().optional(),
+  streamPlaybackUrl: z.string().nullable().optional(),
+  streamEmbedUrl: z.string().nullable().optional(),
+});
+
+const workflowArtifactSchema = z.object({
+  path: z.string(),
+  role: z.string(),
+  contentType: z.string(),
+  size: z.number(),
+  storage: workflowStoragePointerSchema,
+});
+
+const workflowArtifactManifestSchema = z.object({
+  runId: z.string(),
+  skillId: z.string(),
+  artifacts: z.array(workflowArtifactSchema),
+  skippedSteps: z.array(workflowSkippedStepSchema),
+  warnings: z.array(z.string()).optional(),
+  studioUrl: z.string().nullable().optional(),
+});
+
+const workflowErrorSchema = z.object({
+  phase: z.string(),
+  message: z.string(),
+  retryable: z.boolean(),
+});
+
+export const workflowRunClientSchema = z.object({
+  id: z.string(),
+  projectId: z.string().nullable(),
+  skillId: z.string(),
+  status: z.enum(["queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled"]),
+  phase: z.enum(["preflight", "capture", "compose", "validate", "persist", "complete"]),
+  inputUrl: z.string(),
+  options: z.record(z.string(), z.unknown()).nullable(),
+  progress: workflowProgressSchema.nullable(),
+  artifactManifest: workflowArtifactManifestSchema.nullable(),
+  artifacts: z.array(workflowArtifactSchema),
+  skippedSteps: z.array(workflowSkippedStepSchema),
+  error: workflowErrorSchema.nullable(),
+  studioUrl: z.string().nullable(),
+  createdAt: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+});
+
+export const startHyperframesWorkflowInputSchema = z.object({
+  workflowId: z.literal("website-to-video"),
+  url: z.string().trim().min(1).max(2_000),
+  durationSec: z.number().min(1).max(300).optional(),
+  title: z.string().trim().min(1).max(160).optional(),
+  projectId: z.string().trim().min(1).max(200).optional(),
+});
+
+export const workflowRunLookupInputSchema = z.object({
+  runId: z.string().trim().min(1).max(200),
+});
+
 export const getHyperframesGuidelinesTool = toolDefinition({
   name: "get_hyperframes_guidelines",
   description: "Return the HyperFrames composition rules needed to prepare render-safe prompts.",
@@ -185,6 +264,37 @@ export const generateHyperframeTool = toolDefinition({
   description: "Generate a HyperFrame from an approved final prompt and update or create the project.",
   inputSchema: generateHyperframeInputSchema,
   outputSchema: generateHyperframeOutputSchema,
+  needsApproval: true,
+});
+
+export const startHyperframesWorkflowTool = toolDefinition({
+  name: "start_hyperframes_workflow",
+  description: "Start an approved HyperFrames workflow run, currently website-to-video, and return the queued run state.",
+  inputSchema: startHyperframesWorkflowInputSchema,
+  outputSchema: workflowRunClientSchema,
+  needsApproval: true,
+});
+
+export const getHyperframesWorkflowRunTool = toolDefinition({
+  name: "get_hyperframes_workflow_run",
+  description: "Read-only. Fetch compact status, artifacts, skipped steps, and Studio handoff metadata for a workflow run.",
+  inputSchema: workflowRunLookupInputSchema,
+  outputSchema: workflowRunClientSchema,
+});
+
+export const continueHyperframesWorkflowTool = toolDefinition({
+  name: "continue_hyperframes_workflow",
+  description: "Continue an approved HyperFrames workflow run that is queued or awaiting approval.",
+  inputSchema: workflowRunLookupInputSchema,
+  outputSchema: workflowRunClientSchema,
+  needsApproval: true,
+});
+
+export const cancelHyperframesWorkflowTool = toolDefinition({
+  name: "cancel_hyperframes_workflow",
+  description: "Cancel an approved queued, running, or awaiting-approval HyperFrames workflow run.",
+  inputSchema: workflowRunLookupInputSchema,
+  outputSchema: workflowRunClientSchema,
   needsApproval: true,
 });
 

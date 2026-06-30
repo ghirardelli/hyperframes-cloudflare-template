@@ -121,7 +121,6 @@ ALTER TABLE "project_snapshots" ADD CONSTRAINT "project_snapshots_organization_i
 ALTER TABLE "project_snapshots" ADD CONSTRAINT "project_snapshots_created_by_id_users_id_fk" FOREIGN KEY ("created_by_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "project_entries_project_id_path_unique" ON "project_entries" USING btree ("project_id","path");--> statement-breakpoint
 CREATE INDEX "project_entries_org_project_idx" ON "project_entries" USING btree ("organization_id","project_id");--> statement-breakpoint
-CREATE INDEX "project_entries_search_idx" ON "project_entries" USING btree ("search_text");--> statement-breakpoint
 CREATE INDEX "project_entry_versions_entry_created_idx" ON "project_entry_versions" USING btree ("entry_id","created_at");--> statement-breakpoint
 CREATE INDEX "project_entry_versions_project_created_idx" ON "project_entry_versions" USING btree ("project_id","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "project_members_project_id_user_id_unique" ON "project_members" USING btree ("project_id","user_id");--> statement-breakpoint

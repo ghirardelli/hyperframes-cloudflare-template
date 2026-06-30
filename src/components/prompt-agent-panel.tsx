@@ -4,6 +4,7 @@ import { clientTools, fetchServerSentEvents } from "@tanstack/ai-client";
 import type { UIMessage } from "@tanstack/ai-client";
 import {
   Check,
+  ExternalLink,
   Loader2,
   MessageCircle,
   RotateCcw,
@@ -25,9 +26,11 @@ import {
 } from "@/lib/prompt-agent-contract";
 import {
   findLatestGeneratedHyperframe,
+  findLatestWorkflowRun,
   formatAgentToolState,
   promptAgentToolLabel,
   safePreview,
+  type WorkflowRunOutput,
 } from "@/lib/prompt-agent-client";
 
 interface PromptAgentPanelProps {
@@ -149,6 +152,10 @@ export function PromptAgentPanel({
   const promptPackage =
     final ?? normalizePartialResult(partial as PromptAgentPartialResult);
   const hasPackagePrompt = Boolean(promptPackage?.generationPrompt?.trim());
+  const latestWorkflowRun = useMemo(
+    () => findLatestWorkflowRun(messages)?.output ?? null,
+    [messages],
+  );
 
   async function submitAgentMessage() {
     const message = agentInput.trim();
@@ -223,6 +230,7 @@ export function PromptAgentPanel({
             canApply={hasPackagePrompt}
           />
         ) : null}
+        {latestWorkflowRun ? <WorkflowRunArtifact run={latestWorkflowRun} /> : null}
         {isLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -286,6 +294,81 @@ export function PromptAgentPanel({
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function WorkflowRunArtifact({ run }: { run: WorkflowRunOutput }) {
+  const progressLabel = run.progress?.label || run.phase;
+  const progressText = run.progress
+    ? `${run.progress.current}/${run.progress.total}`
+    : run.status;
+  const tone =
+    run.status === "failed"
+      ? "border-red-300 bg-red-50 text-red-950"
+      : run.status === "succeeded"
+        ? "border-emerald-300 bg-emerald-50 text-emerald-950"
+        : "border-hairline bg-white text-body";
+
+  return (
+    <div className={cn("rounded-md border p-3 text-sm shadow-sm", tone)}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-medium uppercase tracking-normal opacity-70">
+            Website workflow
+          </div>
+          <div className="mt-1 font-medium">{progressLabel}</div>
+          <div className="mt-0.5 text-xs opacity-75">
+            {run.status} · {progressText}
+          </div>
+        </div>
+        <Badge variant="outline">{run.phase}</Badge>
+      </div>
+
+      {run.error ? (
+        <p className="mt-3 text-sm">{run.error.message}</p>
+      ) : null}
+
+      {run.artifactManifest?.warnings?.length ? (
+        <div className="mt-3 space-y-1 text-xs opacity-80">
+          {run.artifactManifest.warnings.slice(0, 2).map((warning, index) => (
+            <div key={`${warning}-${index}`}>{warning}</div>
+          ))}
+        </div>
+      ) : null}
+
+      {run.artifacts.length ? (
+        <div className="mt-3 grid gap-1 text-xs">
+          {run.artifacts.slice(0, 4).map((artifact) => (
+            <div
+              key={`${artifact.role}-${artifact.path}`}
+              className="flex items-center justify-between gap-2 rounded-md bg-white/70 px-2 py-1"
+            >
+              <span className="truncate">{artifact.path}</span>
+              <span className="shrink-0 opacity-70">{artifact.storage.provider}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {run.skippedSteps.length ? (
+        <div className="mt-3 flex flex-wrap gap-1">
+          {run.skippedSteps.slice(0, 4).map((step) => (
+            <Badge key={step.id} variant="secondary" className="rounded-full">
+              {step.label}
+            </Badge>
+          ))}
+        </div>
+      ) : null}
+
+      {run.studioUrl ? (
+        <Button asChild size="sm" variant="secondary" className="mt-3">
+          <a href={run.studioUrl}>
+            <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            Open Studio
+          </a>
+        </Button>
+      ) : null}
     </div>
   );
 }

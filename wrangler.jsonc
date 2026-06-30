@@ -13,6 +13,7 @@
   // run the render container on your account from generated HTML.
   "vars": {
     "ENABLE_AI_GEN": "true",
+    "ENABLE_WEBSITE_TO_VIDEO_WORKFLOW": "false",
     // Optional first-admin bootstrap. Remove after assigning real admin users:
     // "INITIAL_ADMIN_EMAILS": "admin@example.com"
     // Optional model override:
@@ -45,17 +46,26 @@
       "image": "./Dockerfile",
       "max_instances": 5,
       "instance_type": "standard-4"
+    },
+    {
+      "name": "hyperframes-on-cloudflare-workflowcontainer",
+      "class_name": "WorkflowContainer",
+      "image": "./Dockerfile",
+      "max_instances": 2,
+      "instance_type": "standard-1"
     }
   ],
 
   "durable_objects": {
     "bindings": [
-      { "name": "RENDER_CONTAINER", "class_name": "RenderContainer" }
+      { "name": "RENDER_CONTAINER", "class_name": "RenderContainer" },
+      { "name": "WORKFLOW_CONTAINER", "class_name": "WorkflowContainer" }
     ]
   },
 
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["RenderContainer"] }
+    { "tag": "v1", "new_sqlite_classes": ["RenderContainer"] },
+    { "tag": "v2", "new_sqlite_classes": ["WorkflowContainer"] }
   ],
 
   "r2_buckets": [

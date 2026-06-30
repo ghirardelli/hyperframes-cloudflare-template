@@ -3,7 +3,7 @@ import { and, desc, eq, ilike, isNull, or } from "drizzle-orm";
 
 import { createAuth } from "../auth";
 import manifest from "../composition-manifest.json";
-import { RenderContainer } from "../container";
+import { RenderContainer, WorkflowContainer } from "../container";
 import { createDb } from "../db";
 import {
   organizationMemberships,
@@ -43,14 +43,19 @@ import { normalizeProjectPath } from "../lib/project-paths";
 import { projectRenderArchiveKey, writeProjectObject } from "../lib/project-storage";
 import { handleStudioFilesApi, renderProjectPreview, upsertProjectFile } from "./studio-files-api";
 import { handlePromptAgentChat } from "./prompt-agent-api";
+import { handleWorkflowApi, type WorkflowExecutionContext } from "./workflow-api";
+import { isWebsiteToVideoWorkflowEnabled } from "../lib/website-to-video-workflow";
 
 export interface WorkerEnv extends TenantAuthEnv, BunnyEnv {
   ASSETS: Fetcher;
   RENDER_CONTAINER: DurableObjectNamespace<RenderContainer>;
+  WORKFLOW_CONTAINER?: DurableObjectNamespace<WorkflowContainer>;
   RENDERS: R2Bucket;
   HYPERDRIVE?: Hyperdrive;
   /** "true" enables AI generation. Configure in wrangler.jsonc vars. */
   ENABLE_AI_GEN?: string;
+  /** "true" enables the website-to-video workflow runner. */
+  ENABLE_WEBSITE_TO_VIDEO_WORKFLOW?: string;
   /** Server-side OpenRouter API key. Set with `wrangler secret put OPENROUTER_API_KEY`. */
   OPENROUTER_API_KEY?: string;
   /** Optional OpenRouter model override. */
@@ -72,6 +77,7 @@ const ENCODER = new TextEncoder();
 export async function handleWorkerApi(
   req: Request,
   env: WorkerEnv,
+  ctx?: WorkflowExecutionContext,
 ): Promise<Response | null> {
   const url = new URL(req.url);
   const { pathname } = url;
@@ -94,6 +100,7 @@ export async function handleWorkerApi(
     return Response.json(
       {
         aiGenEnabled: env.ENABLE_AI_GEN === "true",
+        websiteToVideoWorkflowEnabled: isWebsiteToVideoWorkflowEnabled(env),
         modelLabel: env.OPENROUTER_MODEL?.trim() || DEFAULT_MODEL,
       },
       { headers: { "cache-control": "public, max-age=300" } },
@@ -113,7 +120,7 @@ export async function handleWorkerApi(
     });
   }
 
-  const appApiResponse = await handleAppApi(env, req, pathname);
+  const appApiResponse = await handleAppApi(env, req, pathname, ctx);
   if (appApiResponse) return appApiResponse;
 
   if (req.method === "POST" && pathname === "/api/render") {
@@ -800,6 +807,7 @@ async function handleAppApi(
   env: WorkerEnv,
   req: Request,
   pathname: string,
+  ctx?: WorkflowExecutionContext,
 ): Promise<Response | null> {
   if (!pathname.startsWith("/api/")) return null;
   if (pathname === "/api/config" || pathname === "/api/auth" || pathname.startsWith("/api/auth/")) {
@@ -813,6 +821,12 @@ async function handleAppApi(
   if (auth instanceof Response) return auth;
 
   try {
+    if (pathname === "/api/workflows/website-to-video" || /^\/api\/workflows\/[^/]+(?:\/(?:continue|cancel))?$/.test(pathname)) {
+      const tenant = requireTenantOrganization(auth);
+      if (tenant) return tenant;
+      return await handleWorkflowApi(env, req, pathname, auth, ctx);
+    }
+
     if (pathname === "/api/me" && req.method === "GET") {
       return Response.json(auth);
     }
