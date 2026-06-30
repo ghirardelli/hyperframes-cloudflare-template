@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { AppHeader } from "@/components/app-header";
@@ -7,40 +7,28 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/toast";
+import { messageFromError } from "@/lib/api-client";
+import {
+  useChangePasswordMutation,
+  useProfileQuery,
+  useUpdateProfileMutation,
+} from "@/lib/app-queries";
 
 export const Route = createFileRoute("/profile")({
   component: ProfilePage,
 });
 
-interface Profile {
-  user: {
-    name: string;
-    email: string;
-    role?: string | null;
-  };
-  organization: {
-    name: string;
-  };
-}
-
 function ProfilePage() {
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const { data: profile } = useProfileQuery();
+  const updateProfileMutation = useUpdateProfileMutation();
+  const changePasswordMutation = useChangePasswordMutation();
   const toast = useToast();
-
-  useEffect(() => {
-    fetchJson<Profile>("/api/profile").then(setProfile).catch((err) => toast.error(messageFromError(err)));
-  }, [toast]);
 
   async function updateProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     try {
-      const data = await fetchJson<Profile>("/api/profile", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: String(form.get("name")) }),
-      });
-      setProfile(data);
+      await updateProfileMutation.mutateAsync(String(form.get("name")));
       toast.success("Profile updated.");
     } catch (err) {
       toast.error(messageFromError(err));
@@ -52,13 +40,9 @@ function ProfilePage() {
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     try {
-      await fetchJson("/api/profile/password", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          currentPassword: String(form.get("currentPassword")),
-          newPassword: String(form.get("newPassword")),
-        }),
+      await changePasswordMutation.mutateAsync({
+        currentPassword: String(form.get("currentPassword")),
+        newPassword: String(form.get("newPassword")),
       });
       formElement.reset();
       toast.success("Password changed.");
@@ -87,11 +71,20 @@ function ProfilePage() {
               <form className="space-y-4" onSubmit={updateProfile}>
                 <div className="space-y-2">
                   <Label htmlFor="name">Name</Label>
-                  <Input id="name" name="name" defaultValue={profile?.user.name ?? ""} required />
+                  <Input
+                    key={profile?.user.name ?? "loading"}
+                    id="name"
+                    name="name"
+                    defaultValue={profile?.user.name ?? ""}
+                    required
+                    disabled={updateProfileMutation.isPending}
+                  />
                 </div>
                 <ReadOnly label="Email" value={profile?.user.email ?? ""} />
                 <ReadOnly label="Organization" value={profile?.organization.name ?? ""} />
-                <Button type="submit">Save profile</Button>
+                <Button type="submit" disabled={updateProfileMutation.isPending}>
+                  Save profile
+                </Button>
               </form>
             </CardContent>
           </Card>
@@ -105,13 +98,27 @@ function ProfilePage() {
               <form className="space-y-4" onSubmit={changePassword}>
                 <div className="space-y-2">
                   <Label htmlFor="currentPassword">Current password</Label>
-                  <Input id="currentPassword" name="currentPassword" type="password" required />
+                  <Input
+                    id="currentPassword"
+                    name="currentPassword"
+                    type="password"
+                    required
+                    disabled={changePasswordMutation.isPending}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="newPassword">New password</Label>
-                  <Input id="newPassword" name="newPassword" type="password" required />
+                  <Input
+                    id="newPassword"
+                    name="newPassword"
+                    type="password"
+                    required
+                    disabled={changePasswordMutation.isPending}
+                  />
                 </div>
-                <Button type="submit">Change password</Button>
+                <Button type="submit" disabled={changePasswordMutation.isPending}>
+                  Change password
+                </Button>
               </form>
             </CardContent>
           </Card>
@@ -131,16 +138,4 @@ function ReadOnly({ label, value }: { label: string; value: string }) {
       </div>
     </div>
   );
-}
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  if (response.status === 401) window.location.assign("/login");
-  const data = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) throw new Error(data.error || "Request failed");
-  return data;
-}
-
-function messageFromError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 
 import { ToastProvider } from "@/components/ui/toast";
+import { AppQueryProvider } from "@/lib/query-client";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
@@ -49,7 +50,9 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
         <HeadContent />
       </head>
       <body>
-        <ToastProvider>{children}</ToastProvider>
+        <AppQueryProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </AppQueryProvider>
         <Scripts />
       </body>
     </html>

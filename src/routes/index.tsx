@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   Bot,
@@ -33,8 +34,15 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { messageFromError } from "@/lib/api-client";
 import {
-  buildRenderRequestBody,
+  invalidateProjectCaches,
+  useConfigQuery,
+  useGenerateHyperframeMutation,
+  useMeQuery,
+  useRenderMutation,
+} from "@/lib/app-queries";
+import {
   DEFAULT_CREATION_MODE,
   DEFAULT_DURATION_SEC,
   DEFAULT_RENDER_FORMAT,
@@ -76,46 +84,15 @@ export const Route = createFileRoute("/")({
   component: MotionFramesHome,
 });
 
-interface ConfigResponse {
-  aiGenEnabled: boolean;
-  modelLabel: string;
-}
-
-interface GenerateResponse {
-  html?: string;
-  project?: { id: string; title: string };
-  model?: string;
-  attempts?: number;
-  durationMs?: number;
-  lintOk?: boolean;
-  lintErrors?: Array<string>;
-  error?: string;
-}
-
-interface RenderResponse {
-  url?: string;
-  durationMs?: number;
-  source?: "bundled" | "html";
-  error?: string;
-}
-
-interface MeResponse {
-  user: {
-    id: string;
-    name: string;
-    email: string;
-    role?: string | null;
-  };
-  organization: {
-    id: string;
-    name: string;
-  };
-}
-
 const DEFAULT_PROMPT =
   "A 6 second kinetic product teaser for Motion Frames: crisp editorial typography, a Cloudflare orange accent, a teal render timeline, and one clean camera move.";
 
 function MotionFramesHome() {
+  const queryClient = useQueryClient();
+  const meQuery = useMeQuery();
+  const configQuery = useConfigQuery();
+  const generateMutation = useGenerateHyperframeMutation();
+  const renderMutation = useRenderMutation();
   const playerRef = useRef<HTMLElement | null>(null);
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [, setCreationModeState] = useState<CreationMode>(
@@ -136,17 +113,17 @@ function MotionFramesHome() {
   const [selectedComponentIds, setSelectedComponentIds] = useState<Array<string>>([]);
   const [componentPlacementIntents, setComponentPlacementIntents] = useState<Record<string, string>>({});
   const [generatedHtml, setGeneratedHtml] = useState("");
-  const [aiEnabled, setAiEnabled] = useState(false);
-  const [modelLabel, setModelLabel] = useState("");
-  const [me, setMe] = useState<MeResponse | null>(null);
   const [activeProjectId, setActiveProjectId] = useState("");
   const [activeProjectTitle, setActiveProjectTitle] = useState("");
-  const [isConfigReady, setIsConfigReady] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isRendering, setIsRendering] = useState(false);
   const [renderUrl, setRenderUrl] = useState("");
   const toast = useToast();
 
+  const me = meQuery.data ?? null;
+  const aiEnabled = configQuery.data?.aiGenEnabled ?? false;
+  const modelLabel = configQuery.data?.modelLabel ?? "";
+  const isConfigReady = !configQuery.isPending;
+  const isGenerating = generateMutation.isPending;
+  const isRendering = renderMutation.isPending;
   const activeSource = generatedHtml ? "Generated HTML" : "Bundled intro";
   const hasGeneratedOutput = Boolean(generatedHtml || activeProjectId);
   const canGenerate = aiEnabled && prompt.trim().length > 0;
@@ -177,33 +154,8 @@ function MotionFramesHome() {
   const selectedGalleryCount = countSelectedGalleryItems(selectedGalleryContext);
 
   useEffect(() => {
-    fetch("/api/me")
-      .then((res) => {
-        if (res.status === 401) {
-          window.location.assign("/login");
-          return null;
-        }
-        if (!res.ok) throw new Error("Unable to load profile");
-        return res.json() as Promise<MeResponse>;
-      })
-      .then((data) => {
-        if (data) setMe(data);
-      })
-      .catch(() => {
-        window.location.assign("/login");
-      });
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/config")
-      .then((res) => res.json() as Promise<ConfigResponse>)
-      .then((config) => {
-        setAiEnabled(config.aiGenEnabled);
-        setModelLabel(config.modelLabel);
-      })
-      .catch(() => setAiEnabled(false))
-      .finally(() => setIsConfigReady(true));
-  }, []);
+    if (meQuery.isError) window.location.assign("/login");
+  }, [meQuery.isError]);
 
   useEffect(() => {
     if (!isConfigReady) return;
@@ -250,25 +202,17 @@ function MotionFramesHome() {
 
   async function generate() {
     if (!canGenerate) return;
-    setIsGenerating(true);
     setRenderUrl("");
     toast.info("Generating composition...");
 
     try {
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          prompt: prompt.trim(),
-          durationSec,
-          projectId: activeProjectId || undefined,
-          selectedGalleryContext: selectedGalleryCount ? selectedGalleryContext : undefined,
-        }),
+      const data = await generateMutation.mutateAsync({
+        prompt: prompt.trim(),
+        durationSec,
+        projectId: activeProjectId || undefined,
+        selectedGalleryContext: selectedGalleryCount ? selectedGalleryContext : undefined,
       });
-      const data = (await response.json()) as GenerateResponse;
-      if (!response.ok || !data.html) {
-        throw new Error(data.error ?? "Generation failed");
-      }
+      if (!data.html) throw new Error("Generation failed");
 
       setGeneratedHtml(data.html);
       setWorkspaceSurface("preview");
@@ -282,8 +226,6 @@ function MotionFramesHome() {
       });
     } catch (err) {
       toast.error(messageFromError(err));
-    } finally {
-      setIsGenerating(false);
     }
   }
 
@@ -294,6 +236,7 @@ function MotionFramesHome() {
     if (data.project?.id) {
       setActiveProjectId(data.project.id);
       setActiveProjectTitle(data.project.title);
+      invalidateProjectCaches(queryClient, data.project.id);
     }
     toast.show({
       tone: data.lintOk ? "success" : "warning",
@@ -303,26 +246,17 @@ function MotionFramesHome() {
 
   async function render() {
     if (!canRender) return;
-    setIsRendering(true);
     setRenderUrl("");
     toast.info(`Rendering ${renderFormatName}...`);
 
     try {
-      const body = buildRenderRequestBody({
+      const data = await renderMutation.mutateAsync({
         html: generatedHtml,
         projectId: activeProjectId,
         resolutionId: exportResolutionId,
         format: renderFormat,
       });
-      const response = await fetch("/api/render", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = (await response.json()) as RenderResponse;
-      if (!response.ok || !data.url) {
-        throw new Error(data.error ?? "Render failed");
-      }
+      if (!data.url) throw new Error("Render failed");
 
       setRenderUrl(data.url);
       toast.success(
@@ -330,8 +264,6 @@ function MotionFramesHome() {
       );
     } catch (err) {
       toast.error(messageFromError(err));
-    } finally {
-      setIsRendering(false);
     }
   }
 
@@ -788,8 +720,4 @@ function formatDurationOption(seconds: number): string {
   if (seconds < 60) return `${seconds} seconds`;
   const minutes = seconds / 60;
   return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
-}
-
-function messageFromError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

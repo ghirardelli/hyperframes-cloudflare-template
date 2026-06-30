@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useQueries } from "@tanstack/react-query";
+import { FormEvent, useMemo, useState } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import {
   AlertCircle,
@@ -21,9 +22,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { messageFromError } from "@/lib/api-client";
+import {
+  projectRendersQueryOptions,
+  useDeleteProjectMutation,
+  useProjectsQuery,
+  useUpdateProjectMetadataMutation,
+  type Project,
+} from "@/lib/app-queries";
 import {
   buildProjectLibraryItems,
-  type ProjectLibraryProject,
   type ProjectLibraryRender,
 } from "@/lib/my-projects-gallery";
 import {
@@ -36,23 +44,28 @@ export const Route = createFileRoute("/projects/")({
   component: ProjectsPage,
 });
 
-type Project = ProjectLibraryProject & {
-  prompt?: string | null;
-  visibility?: string | null;
-  status?: string | null;
-};
-
-interface ProjectRendersResponse {
-  renders: Array<ProjectLibraryRender>;
-}
-
 function ProjectsPage() {
-  const [projects, setProjects] = useState<Array<Project>>([]);
-  const [rendersByProject, setRendersByProject] = useState<
-    Record<string, Array<ProjectLibraryRender>>
-  >({});
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
+  const projectsQuery = useProjectsQuery();
+  const projects = projectsQuery.data?.projects ?? [];
+  const renderQueries = useQueries({
+    queries: projects.map((project) => projectRendersQueryOptions(project.id)),
+  });
+  const updateProjectMutation = useUpdateProjectMetadataMutation();
+  const deleteProjectMutation = useDeleteProjectMutation();
+  const rendersByProject = useMemo(
+    () =>
+      Object.fromEntries(
+        projects.map((project, index) => [
+          project.id,
+          renderQueries[index]?.data?.renders.slice(0, 1) ?? [],
+        ]),
+      ) as Record<string, Array<ProjectLibraryRender>>,
+    [projects, renderQueries],
+  );
+  const loading =
+    projectsQuery.isPending ||
+    (projectsQuery.isSuccess && renderQueries.some((query) => query.isPending));
+  const loadError = projectsQuery.isError ? messageFromError(projectsQuery.error) : "";
   const [editingId, setEditingId] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
@@ -60,40 +73,6 @@ function ProjectsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deletingId, setDeletingId] = useState("");
   const toast = useToast();
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        setLoading(true);
-        setLoadError("");
-        const data = await fetchJson<{ projects: Array<Project> }>("/api/projects");
-        if (cancelled) return;
-        setProjects(data.projects);
-        const renderPairs = await Promise.all(
-          data.projects.map(async (project) => {
-            try {
-              const renders = await fetchJson<ProjectRendersResponse>(
-                `/api/projects/${encodeURIComponent(project.id)}/renders`,
-              );
-              return [project.id, renders.renders.slice(0, 1)] as const;
-            } catch {
-              return [project.id, []] as const;
-            }
-          }),
-        );
-        if (!cancelled) setRendersByProject(Object.fromEntries(renderPairs));
-      } catch (err) {
-        if (!cancelled) setLoadError(messageFromError(err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const items = useMemo(
     () => buildProjectLibraryItems(projects, rendersByProject),
@@ -110,20 +89,11 @@ function ProjectsPage() {
     event.preventDefault();
     try {
       setSavingId(projectId);
-      const data = await fetchJson<{ project: Project }>(
-        `/api/projects/${encodeURIComponent(projectId)}`,
-        {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            title: draftTitle,
-            description: draftDescription,
-          }),
-        },
-      );
-      setProjects((current) =>
-        current.map((project) => (project.id === projectId ? data.project : project)),
-      );
+      await updateProjectMutation.mutateAsync({
+        projectId,
+        title: draftTitle,
+        description: draftDescription,
+      });
       setEditingId("");
       toast.success("Project updated.");
     } catch (err) {
@@ -141,15 +111,7 @@ function ProjectsPage() {
     if (!deleteTarget) return;
     try {
       setDeletingId(deleteTarget.id);
-      await fetchJson<{ ok: true }>(`/api/projects/${encodeURIComponent(deleteTarget.id)}`, {
-        method: "DELETE",
-      });
-      setProjects((current) => current.filter((project) => project.id !== deleteTarget.id));
-      setRendersByProject((current) => {
-        const next = { ...current };
-        delete next[deleteTarget.id];
-        return next;
-      });
+      await deleteProjectMutation.mutateAsync(deleteTarget.id);
       setEditingId((current) => (current === deleteTarget.id ? "" : current));
       setDeleteTarget(null);
       toast.success("Project deleted.");
@@ -428,16 +390,4 @@ function ProjectsPage() {
       ) : null}
     </div>
   );
-}
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  if (response.status === 401) window.location.assign("/login");
-  const data = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) throw new Error(data.error || "Request failed");
-  return data;
-}
-
-function messageFromError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

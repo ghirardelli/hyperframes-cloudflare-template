@@ -1,14 +1,11 @@
-import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Film, LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { apiJson } from "@/lib/api-client";
+import { clearProtectedCaches, useMeQuery } from "@/lib/app-queries";
 
 type NavKey = "workspace" | "projects" | "playground" | "admin" | "profile";
-
-interface MeResponse {
-  user: { role?: string | null };
-  organization: { name?: string | null };
-}
 
 const NAV: Array<{ key: NavKey; label: string; href: string; adminOnly?: boolean }> = [
   { key: "workspace", label: "Workspace", href: "/" },
@@ -20,18 +17,11 @@ const NAV: Array<{ key: NavKey; label: string; href: string; adminOnly?: boolean
 
 /**
  * Global top navigation. Full-width, sticky to the top of every authenticated
- * page so the header stays consistent across the site. Fetches /api/me itself
- * to stay self-contained (org name + admin visibility) and provides logout.
+ * page so the header stays consistent across the site.
  */
 export function AppHeader({ active }: { active?: NavKey }) {
-  const [me, setMe] = useState<MeResponse | null>(null);
-
-  useEffect(() => {
-    fetch("/api/me", { headers: { accept: "application/json" } })
-      .then((r) => (r.ok ? (r.json() as Promise<MeResponse>) : null))
-      .then(setMe)
-      .catch(() => {});
-  }, []);
+  const queryClient = useQueryClient();
+  const { data: me } = useMeQuery();
 
   const isAdmin = !!me?.user.role
     ?.split(",")
@@ -39,11 +29,11 @@ export function AppHeader({ active }: { active?: NavKey }) {
     .includes("admin");
 
   async function logout() {
-    await fetch("/api/auth/sign-out", {
+    await apiJson("/api/auth/sign-out", {
       method: "POST",
-      headers: { "content-type": "application/json" },
       body: "{}",
     }).catch(() => {});
+    clearProtectedCaches(queryClient);
     window.location.assign("/login");
   }
 

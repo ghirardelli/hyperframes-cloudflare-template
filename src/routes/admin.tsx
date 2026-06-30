@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Lock, Unlock, UserPlus } from "lucide-react";
 
@@ -8,80 +8,53 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/toast";
+import { messageFromError } from "@/lib/api-client";
+import {
+  useAdminOrganizationsQuery,
+  useAdminUsersQuery,
+  useCreateAdminUserMutation,
+  useMeQuery,
+  useSetUserLockedMutation,
+  type AdminUser,
+} from "@/lib/app-queries";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
 });
 
-interface Organization {
-  id: string;
-  name: string;
-}
-
-interface AdminUser {
-  id: string;
-  name: string;
-  email: string;
-  role?: string | null;
-  banned?: boolean | null;
-  organizationId?: string | null;
-  organizationName?: string | null;
-}
-
 function AdminPage() {
-  const [organizations, setOrganizations] = useState<Array<Organization>>([]);
-  const [users, setUsers] = useState<Array<AdminUser>>([]);
-  const [status, setStatus] = useState("");
-  const [canAdmin, setCanAdmin] = useState(false);
+  const meQuery = useMeQuery();
+  const canAdmin = !!meQuery.data?.user.role
+    ?.split(",")
+    .map((role) => role.trim())
+    .includes("admin");
+  const organizationsQuery = useAdminOrganizationsQuery(canAdmin);
+  const usersQuery = useAdminUsersQuery(canAdmin);
+  const createUserMutation = useCreateAdminUserMutation();
+  const setUserLockedMutation = useSetUserLockedMutation();
+  const organizations = organizationsQuery.data?.organizations ?? [];
+  const users = usersQuery.data?.users ?? [];
+  const status = statusMessage({ canAdmin, meQuery, organizationsQuery, usersQuery });
   const toast = useToast();
-
-  useEffect(() => {
-    void refresh().catch((err) => {
-      setStatus(messageFromError(err));
-      setCanAdmin(false);
-    });
-  }, []);
-
-  async function refresh() {
-    const me = await fetchJson<{ user: { role?: string | null } }>("/api/me");
-    if (!me.user.role?.split(",").map((role) => role.trim()).includes("admin")) {
-      setStatus("Admin access required.");
-      setCanAdmin(false);
-      return;
-    }
-    setCanAdmin(true);
-    const [orgData, userData] = await Promise.all([
-      fetchJson<{ organizations: Array<Organization> }>("/api/admin/organizations"),
-      fetchJson<{ users: Array<AdminUser> }>("/api/admin/users"),
-    ]);
-    setOrganizations(orgData.organizations);
-    setUsers(userData.users);
-  }
 
   async function createUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    setStatus("");
     const organizationMode = String(form.get("organizationMode"));
     try {
-      await fetchJson("/api/admin/users", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name: String(form.get("name")),
-          email: String(form.get("email")),
-          password: String(form.get("password")),
-          role: String(form.get("role")),
-          organizationId:
-            organizationMode === "existing" ? String(form.get("organizationId")) : undefined,
-          organizationName:
-            organizationMode === "new" ? String(form.get("organizationName")) : undefined,
-        }),
+      await createUserMutation.mutateAsync({
+        name: String(form.get("name")),
+        email: String(form.get("email")),
+        password: String(form.get("password")),
+        role: String(form.get("role")),
+        organizationId:
+          organizationMode === "existing" ? String(form.get("organizationId")) : undefined,
+        organizationName:
+          organizationMode === "new" ? String(form.get("organizationName")) : undefined,
       });
       formElement.reset();
       toast.success("User created.");
-      await refresh();
     } catch (err) {
       toast.error(messageFromError(err));
     }
@@ -89,12 +62,7 @@ function AdminPage() {
 
   async function setLocked(user: AdminUser, locked: boolean) {
     try {
-      await fetchJson(`/api/admin/users/${user.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ locked }),
-      });
-      await refresh();
+      await setUserLockedMutation.mutateAsync({ userId: user.id, locked });
       toast.success(`${user.name} ${locked ? "locked" : "unlocked"}.`);
     } catch (err) {
       toast.error(messageFromError(err));
@@ -162,7 +130,7 @@ function AdminPage() {
                   </select>
                 </div>
                 <Field name="organizationName" label="New organization name" required={false} />
-                <Button type="submit" className="w-full">
+                <Button type="submit" className="w-full" disabled={createUserMutation.isPending}>
                   <UserPlus className="h-4 w-4" aria-hidden="true" />
                   Create user
                 </Button>
@@ -188,6 +156,7 @@ function AdminPage() {
                   variant={user.banned ? "default" : "outline"}
                   size="sm"
                   onClick={() => void setLocked(user, !user.banned)}
+                  disabled={setUserLockedMutation.isPending}
                 >
                   {user.banned ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
                   {user.banned ? "Unlock" : "Lock"}
@@ -199,6 +168,25 @@ function AdminPage() {
       </main>
     </div>
   );
+}
+
+function statusMessage({
+  canAdmin,
+  meQuery,
+  organizationsQuery,
+  usersQuery,
+}: {
+  canAdmin: boolean;
+  meQuery: ReturnType<typeof useMeQuery>;
+  organizationsQuery: ReturnType<typeof useAdminOrganizationsQuery>;
+  usersQuery: ReturnType<typeof useAdminUsersQuery>;
+}): string {
+  if (meQuery.isPending) return "Checking access...";
+  if (meQuery.isError) return messageFromError(meQuery.error);
+  if (!canAdmin) return "Admin access required.";
+  if (organizationsQuery.isError) return messageFromError(organizationsQuery.error);
+  if (usersQuery.isError) return messageFromError(usersQuery.error);
+  return "";
 }
 
 function Field({
@@ -218,17 +206,4 @@ function Field({
       <Input id={name} name={name} type={type} required={required} />
     </div>
   );
-}
-
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  if (response.status === 401) window.location.assign("/login");
-  const data = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) throw new Error(data.error || "Request failed");
-  return data;
-}
-
-function messageFromError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

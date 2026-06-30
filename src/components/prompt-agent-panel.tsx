@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useChat } from "@tanstack/ai-react";
 import { clientTools, fetchServerSentEvents } from "@tanstack/ai-client";
 import type { UIMessage } from "@tanstack/ai-client";
@@ -18,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { invalidateProjectCaches, useWorkflowRunQuery } from "@/lib/app-queries";
 import {
   highlightAgentSectionTool,
   promptAgentResultSchema,
@@ -77,11 +79,13 @@ export function PromptAgentPanel({
   isRendering,
   onGenerated,
 }: PromptAgentPanelProps) {
+  const queryClient = useQueryClient();
   const [agentInput, setAgentInput] = useState("");
   const [focusedSection, setFocusedSection] = useState<
     "chat" | "draft" | "checklist" | "approval" | "preview"
   >("chat");
   const appliedGenerationKeysRef = useRef(new Set<string>());
+  const invalidatedWorkflowProjectIdsRef = useRef(new Set<string>());
   const forwardedPropsRef = useRef({
     projectId: activeProjectId || undefined,
     currentPrompt: prompt,
@@ -157,10 +161,22 @@ export function PromptAgentPanel({
   const promptPackage =
     final ?? normalizePartialResult(partial as PromptAgentPartialResult);
   const hasPackagePrompt = Boolean(promptPackage?.generationPrompt?.trim());
-  const latestWorkflowRun = useMemo(
+  const latestWorkflowRunFromMessages = useMemo(
     () => findLatestWorkflowRun(messages)?.output ?? null,
     [messages],
   );
+  const workflowRunQuery = useWorkflowRunQuery(
+    latestWorkflowRunFromMessages?.id,
+    latestWorkflowRunFromMessages?.status,
+  );
+  const latestWorkflowRun = workflowRunQuery.data ?? latestWorkflowRunFromMessages;
+
+  useEffect(() => {
+    if (latestWorkflowRun?.status !== "succeeded" || !latestWorkflowRun.projectId) return;
+    if (invalidatedWorkflowProjectIdsRef.current.has(latestWorkflowRun.projectId)) return;
+    invalidatedWorkflowProjectIdsRef.current.add(latestWorkflowRun.projectId);
+    invalidateProjectCaches(queryClient, latestWorkflowRun.projectId);
+  }, [latestWorkflowRun?.projectId, latestWorkflowRun?.status, queryClient]);
 
   async function submitAgentMessage() {
     const message = agentInput.trim();

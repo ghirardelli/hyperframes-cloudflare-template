@@ -1,50 +1,27 @@
-import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Copy, Play } from "lucide-react";
 
 import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import { messageFromError } from "@/lib/api-client";
+import { useCatalogQuery, useRemixPublishedProjectMutation } from "@/lib/app-queries";
 
 export const Route = createFileRoute("/playground")({
   component: PlaygroundPage,
 });
 
-interface CatalogItem {
-  id: string;
-  title: string;
-  description?: string | null;
-  durationSec?: number;
-  width?: number;
-  height?: number;
-  projectId?: string;
-}
-
 function PlaygroundPage() {
-  const [catalogCount, setCatalogCount] = useState(0);
-  const [examples, setExamples] = useState<Array<CatalogItem>>([]);
-  const [publishedProjects, setPublishedProjects] = useState<Array<CatalogItem>>([]);
+  const catalogQuery = useCatalogQuery();
+  const remixMutation = useRemixPublishedProjectMutation();
+  const catalogCount = catalogQuery.data?.catalogCount ?? 0;
+  const examples = catalogQuery.data?.examples ?? [];
+  const publishedProjects = catalogQuery.data?.publishedProjects ?? [];
   const toast = useToast();
-
-  useEffect(() => {
-    fetchJson<{
-      catalogCount: number;
-      examples: Array<CatalogItem>;
-      publishedProjects: Array<CatalogItem>;
-    }>("/api/catalog")
-      .then((data) => {
-        setCatalogCount(data.catalogCount);
-        setExamples(data.examples);
-        setPublishedProjects(data.publishedProjects);
-      })
-      .catch((err) => toast.error(messageFromError(err)));
-  }, [toast]);
 
   async function remix(id: string) {
     try {
-      const data = await fetchJson<{ project: { id: string } }>(`/api/published/${id}/remix`, {
-        method: "POST",
-      });
+      const data = await remixMutation.mutateAsync(id);
       window.location.assign(`/projects/${data.project.id}/studio`);
     } catch (err) {
       toast.error(messageFromError(err));
@@ -64,6 +41,12 @@ function PlaygroundPage() {
             Published projects and starter examples stay inside your organization.
           </p>
         </header>
+
+        {catalogQuery.isError ? (
+          <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+            {messageFromError(catalogQuery.error)}
+          </div>
+        ) : null}
 
         <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {items.map((item) => (
@@ -86,7 +69,13 @@ function PlaygroundPage() {
                   </Button>
                 ) : null}
                 {item.projectId ? (
-                  <Button type="button" variant="outline" size="sm" onClick={() => void remix(item.id)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void remix(item.id)}
+                    disabled={remixMutation.isPending}
+                  >
                     <Copy className="h-4 w-4" />
                     Remix
                   </Button>
@@ -98,16 +87,4 @@ function PlaygroundPage() {
       </main>
     </div>
   );
-}
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  if (response.status === 401) window.location.assign("/login");
-  const data = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) throw new Error(data.error || "Request failed");
-  return data;
-}
-
-function messageFromError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
