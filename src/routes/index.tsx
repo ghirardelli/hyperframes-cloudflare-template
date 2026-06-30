@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useForm, useStore } from "@tanstack/react-form";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -62,6 +63,8 @@ import {
   type ExportResolutionId,
   type RenderFormat,
 } from "@/lib/main-page-creation-flow";
+import { creationIntakeFormSchema, type CreationIntakeFormValues } from "@/lib/form-schemas";
+import { fieldError } from "@/lib/form-utils";
 import {
   MAIN_PAGE_GRID_CLASS,
   SELECTED_CONTEXT_BOX_CLASS,
@@ -94,18 +97,26 @@ function MotionFramesHome() {
   const generateMutation = useGenerateHyperframeMutation();
   const renderMutation = useRenderMutation();
   const playerRef = useRef<HTMLElement | null>(null);
-  const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
+  const defaultCreationValues: CreationIntakeFormValues = {
+    prompt: DEFAULT_PROMPT,
+    durationSec: DEFAULT_DURATION_SEC,
+    exportResolutionId: DEFAULT_RENDER_RESOLUTION_ID,
+    renderFormat: DEFAULT_RENDER_FORMAT,
+  };
+  const creationForm = useForm({
+    defaultValues: defaultCreationValues,
+    validators: {
+      onChange: creationIntakeFormSchema,
+      onSubmit: creationIntakeFormSchema,
+    },
+  });
+  const creationValues = useStore(creationForm.store, (state) => state.values);
   const [, setCreationModeState] = useState<CreationMode>(
     () => readStoredCreationMode() ?? DEFAULT_CREATION_MODE,
   );
   const [activeCreationTab, setActiveCreationTab] = useState<CreationTab>(
     () => readStoredCreationMode() ?? DEFAULT_CREATION_MODE,
   );
-  const [durationSec, setDurationSecState] = useState(DEFAULT_DURATION_SEC);
-  const [exportResolutionId, setExportResolutionId] = useState<ExportResolutionId>(
-    DEFAULT_RENDER_RESOLUTION_ID,
-  );
-  const [renderFormat, setRenderFormat] = useState<RenderFormat>(DEFAULT_RENDER_FORMAT);
   const [workspaceSurface, setWorkspaceSurface] = useState<WorkspaceSurface>("gallery");
   const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>("examples");
   const [activeComponentCategory, setActiveComponentCategory] = useState("All");
@@ -126,21 +137,21 @@ function MotionFramesHome() {
   const isRendering = renderMutation.isPending;
   const activeSource = generatedHtml ? "Generated HTML" : "Bundled intro";
   const hasGeneratedOutput = Boolean(generatedHtml || activeProjectId);
-  const canGenerate = aiEnabled && prompt.trim().length > 0;
+  const canGenerate = aiEnabled && creationValues.prompt.trim().length > 0;
   const canRender = !isRendering && !isGenerating;
   const canUseAgentTab = isConfigReady && aiEnabled;
   const visibleCreationTab =
     activeCreationTab === "agent" && !canUseAgentTab
       ? "manual"
       : resolveCreationTab(activeCreationTab, canUseAgentTab);
-  const exportResolution = getExportResolutionPreset(exportResolutionId);
-  const renderFormatName = renderFormatLabel(renderFormat);
+  const exportResolution = getExportResolutionPreset(creationValues.exportResolutionId);
+  const renderFormatName = renderFormatLabel(creationValues.renderFormat);
   const renderSourceDescription = hasGeneratedOutput
     ? "current generated HyperFrame"
     : "bundled default composition";
   const durationOptions = useMemo(
-    () => Array.from(new Set([...DURATION_PRESETS, durationSec])).sort((a, b) => a - b),
-    [durationSec],
+    () => Array.from(new Set([...DURATION_PRESETS, creationValues.durationSec])).sort((a, b) => a - b),
+    [creationValues.durationSec],
   );
   const selectedGalleryContext = useMemo(
     () =>
@@ -196,9 +207,20 @@ function MotionFramesHome() {
     writeStoredCreationMode(tab);
   }
 
-  const setDurationSec = useCallback((value: unknown) => {
-    setDurationSecState(normalizeDurationSec(value));
-  }, []);
+  const setPrompt = useCallback(
+    (value: string | ((current: string) => string)) => {
+      const current = creationForm.state.values.prompt;
+      creationForm.setFieldValue("prompt", typeof value === "function" ? value(current) : value);
+    },
+    [creationForm],
+  );
+
+  const setDurationSec = useCallback(
+    (value: unknown) => {
+      creationForm.setFieldValue("durationSec", normalizeDurationSec(value));
+    },
+    [creationForm],
+  );
 
   async function generate() {
     if (!canGenerate) return;
@@ -206,9 +228,10 @@ function MotionFramesHome() {
     toast.info("Generating composition...");
 
     try {
+      const values = creationIntakeFormSchema.parse(creationForm.state.values);
       const data = await generateMutation.mutateAsync({
-        prompt: prompt.trim(),
-        durationSec,
+        prompt: values.prompt,
+        durationSec: values.durationSec,
         projectId: activeProjectId || undefined,
         selectedGalleryContext: selectedGalleryCount ? selectedGalleryContext : undefined,
       });
@@ -250,11 +273,12 @@ function MotionFramesHome() {
     toast.info(`Rendering ${renderFormatName}...`);
 
     try {
+      const values = creationIntakeFormSchema.parse(creationForm.state.values);
       const data = await renderMutation.mutateAsync({
         html: generatedHtml,
         projectId: activeProjectId,
-        resolutionId: exportResolutionId,
-        format: renderFormat,
+        resolutionId: values.exportResolutionId,
+        format: values.renderFormat,
       });
       if (!data.url) throw new Error("Render failed");
 
@@ -351,7 +375,7 @@ function MotionFramesHome() {
           activeProjectId={activeProjectId}
           activeProjectTitle={activeProjectTitle}
           activeSource={activeSource}
-          durationLabel={formatDurationOption(durationSec)}
+          durationLabel={formatDurationOption(creationValues.durationSec)}
           playerRef={playerRef}
         />
 
@@ -450,19 +474,24 @@ function MotionFramesHome() {
                     <Label htmlFor="duration">Duration</Label>
                     <div className="relative">
                       <Clock3 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                      <select
-                        id="duration"
-                        value={durationSec}
-                        onChange={(event) => setDurationSec(event.target.value)}
-                        disabled={isGenerating || isRendering}
-                        className="h-10 w-full appearance-none rounded-md border border-input bg-background px-9 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {durationOptions.map((seconds) => (
-                          <option key={seconds} value={seconds}>
-                            {formatDurationOption(seconds)}
-                          </option>
-                        ))}
-                      </select>
+                      <creationForm.Field name="durationSec">
+                        {(field) => (
+                          <select
+                            id="duration"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(event) => field.handleChange(normalizeDurationSec(event.target.value))}
+                            disabled={isGenerating || isRendering}
+                            className="h-10 w-full appearance-none rounded-md border border-input bg-background px-9 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {durationOptions.map((seconds) => (
+                              <option key={seconds} value={seconds}>
+                                {formatDurationOption(seconds)}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </creationForm.Field>
                     </div>
                   </div>
                   <div className="rounded-md border border-hairline bg-surface-card px-3 py-2 text-sm text-muted-foreground">
@@ -473,9 +502,9 @@ function MotionFramesHome() {
 
               {visibleCreationTab === "agent" ? (
                 <PromptAgentPanel
-                  prompt={prompt}
+                  prompt={creationValues.prompt}
                   onPromptChange={setPrompt}
-                  durationSec={durationSec}
+                  durationSec={creationValues.durationSec}
                   onDurationChange={setDurationSec}
                   aiEnabled={aiEnabled}
                   isConfigReady={isConfigReady}
@@ -507,13 +536,25 @@ function MotionFramesHome() {
                   ) : null}
                   <div className="space-y-2">
                     <Label htmlFor="prompt">Final generation prompt</Label>
-                    <Textarea
-                      id="prompt"
-                      value={prompt}
-                      onChange={(event) => setPrompt(event.target.value)}
-                      rows={9}
-                      disabled={!isConfigReady || isGenerating || isRendering}
-                    />
+                    <creationForm.Field name="prompt">
+                      {(field) => {
+                        const error = fieldError(field.state.meta);
+                        return (
+                          <>
+                            <Textarea
+                              id="prompt"
+                              value={field.state.value}
+                              onBlur={field.handleBlur}
+                              onChange={(event) => field.handleChange(event.target.value)}
+                              rows={9}
+                              disabled={!isConfigReady || isGenerating || isRendering}
+                              aria-invalid={Boolean(error)}
+                            />
+                            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+                          </>
+                        );
+                      }}
+                    </creationForm.Field>
                   </div>
 
                   <Button
@@ -537,39 +578,49 @@ function MotionFramesHome() {
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="export-resolution">Resolution</Label>
-                      <select
-                        id="export-resolution"
-                        value={exportResolutionId}
-                        onChange={(event) => setExportResolutionId(event.target.value as ExportResolutionId)}
-                        disabled={isRendering}
-                        className="h-10 w-full rounded-md border border-input bg-background px-3.5 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {EXPORT_RESOLUTION_PRESETS.map((preset) => (
-                          <option key={preset.id} value={preset.id}>
-                            {preset.label}
-                          </option>
-                        ))}
-                      </select>
+                      <creationForm.Field name="exportResolutionId">
+                        {(field) => (
+                          <select
+                            id="export-resolution"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(event) => field.handleChange(event.target.value as ExportResolutionId)}
+                            disabled={isRendering}
+                            className="h-10 w-full rounded-md border border-input bg-background px-3.5 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {EXPORT_RESOLUTION_PRESETS.map((preset) => (
+                              <option key={preset.id} value={preset.id}>
+                                {preset.label}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </creationForm.Field>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="export-format">Format</Label>
-                      <select
-                        id="export-format"
-                        value={renderFormat}
-                        onChange={(event) => setRenderFormat(event.target.value as RenderFormat)}
-                        disabled={isRendering}
-                        className="h-10 w-full rounded-md border border-input bg-background px-3.5 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {RENDER_FORMATS.map((format) => (
-                          <option key={format.value} value={format.value}>
-                            {format.label}
-                          </option>
-                        ))}
-                      </select>
+                      <creationForm.Field name="renderFormat">
+                        {(field) => (
+                          <select
+                            id="export-format"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(event) => field.handleChange(event.target.value as RenderFormat)}
+                            disabled={isRendering}
+                            className="h-10 w-full rounded-md border border-input bg-background px-3.5 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {RENDER_FORMATS.map((format) => (
+                              <option key={format.value} value={format.value}>
+                                {format.label}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </creationForm.Field>
                     </div>
                   </div>
                   <div className="rounded-md bg-surface-card px-3 py-2 text-sm text-muted-foreground">
-                    Render exports the {renderSourceDescription} at {exportResolution.width} x {exportResolution.height} as {renderFormatName}. The timeline remains {formatDurationOption(durationSec)}.
+                    Render exports the {renderSourceDescription} at {exportResolution.width} x {exportResolution.height} as {renderFormatName}. The timeline remains {formatDurationOption(creationValues.durationSec)}.
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
                     <Button

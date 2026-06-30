@@ -67,6 +67,36 @@ export function findLatestWorkflowRun(
   return null;
 }
 
+export function findLatestStartedWorkflowRun(
+  messages: Array<MessageLike>,
+): WorkflowRunMatch | null {
+  const startToolCallIds = new Set<string>();
+  for (const message of messages) {
+    const parts = message.parts ?? [];
+    for (const part of parts) {
+      if (isToolCallLike(part) && part.name === "start_hyperframes_workflow") {
+        startToolCallIds.add(part.id);
+      }
+    }
+  }
+
+  for (const message of [...messages].reverse()) {
+    const parts = message.parts ?? [];
+    for (const part of [...parts].reverse()) {
+      if (isToolCallLike(part) && part.name === "start_hyperframes_workflow") {
+        const output = parseWorkflowRunOutput(part.output);
+        if (output) return { key: `tool-call:${part.id}`, output };
+      }
+
+      if (isToolResultLike(part) && startToolCallIds.has(part.toolCallId)) {
+        const output = parseWorkflowRunOutput(part.content);
+        if (output) return { key: `tool-result:${part.toolCallId}`, output };
+      }
+    }
+  }
+  return null;
+}
+
 export function promptAgentToolLabel(name: string): string {
   switch (name) {
     case "get_hyperframes_guidelines":
@@ -93,6 +123,14 @@ export function promptAgentToolLabel(name: string): string {
       return "Continue workflow";
     case "cancel_hyperframes_workflow":
       return "Cancel workflow";
+    case "inspect_workflow_stage":
+      return "Inspect stage";
+    case "propose_workflow_stage_patch":
+      return "Propose stage edit";
+    case "apply_workflow_stage_patch":
+      return "Apply stage edit";
+    case "rerun_workflow_stage_validation":
+      return "Rerun stage validation";
     case "set_draft_prompt":
       return "Apply draft prompt";
     case "highlight_agent_section":

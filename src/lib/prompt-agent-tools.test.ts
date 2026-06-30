@@ -264,4 +264,11 @@ describe("prompt agent server tools", () => {
       ),
     ).rejects.toThrow(/unrecognized key/i);
   });
+
+  it("exposes workflow stage tools with read-only and approval-gated boundaries", () => {
+    expect(getTool("inspect_workflow_stage").needsApproval).not.toBe(true);
+    expect(getTool("propose_workflow_stage_patch").needsApproval).not.toBe(true);
+    expect(getTool("apply_workflow_stage_patch").needsApproval).toBe(true);
+    expect(getTool("rerun_workflow_stage_validation").needsApproval).toBe(true);
+  });
 });

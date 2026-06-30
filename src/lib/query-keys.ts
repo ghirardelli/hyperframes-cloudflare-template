@@ -20,6 +20,11 @@ export const queryKeys = {
   workflows: {
     root: () => [...root, "workflows"] as const,
     run: (runId: string) => [...queryKeys.workflows.root(), "run", runId] as const,
+    stages: (runId: string) => [...queryKeys.workflows.run(runId), "stages"] as const,
+    artifact: (runId: string, path: string) =>
+      [...queryKeys.workflows.stages(runId), "artifact", path] as const,
+    validation: (runId: string, stageId: string) =>
+      [...queryKeys.workflows.stages(runId), "validation", stageId] as const,
   },
   renders: {
     root: () => [...root, "renders"] as const,

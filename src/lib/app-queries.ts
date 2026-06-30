@@ -16,6 +16,12 @@ import {
 } from "./main-page-creation-flow";
 import type { ProjectLibraryProject, ProjectLibraryRender } from "./my-projects-gallery";
 import type { WorkflowRunOutput } from "./prompt-agent-client";
+import type {
+  WizardStageArtifactContent,
+  WizardStageId,
+  WizardStagePlan,
+  WizardStageValidationResult,
+} from "./pipeline-wizard";
 import { queryKeys } from "./query-keys";
 
 export interface CurrentUserResponse {
@@ -340,6 +346,88 @@ export function useWorkflowRunQuery(runId: string | null | undefined, status?: s
     enabled: Boolean(runId) && isWorkflowPollingStatus(status),
     refetchInterval: (query) =>
       isWorkflowPollingStatus(query.state.data?.status ?? status) ? 2_500 : false,
+  });
+}
+
+export function useWorkflowStagePlanQuery(runId: string | null | undefined, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.workflows.stages(runId ?? ""),
+    queryFn: () =>
+      apiJson<{ stagePlan: WizardStagePlan }>(
+        `/api/workflows/${encodeURIComponent(runId ?? "")}/stages`,
+      ).then((data) => data.stagePlan),
+    enabled: enabled && Boolean(runId),
+  });
+}
+
+export function useWorkflowStageArtifactQuery(
+  input: {
+    runId: string | null | undefined;
+    stageId: WizardStageId | null | undefined;
+    path: string | null | undefined;
+  },
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: queryKeys.workflows.artifact(input.runId ?? "", input.path ?? ""),
+    queryFn: () =>
+      apiJson<{ artifact: WizardStageArtifactContent }>(
+        `/api/workflows/${encodeURIComponent(input.runId ?? "")}/stages/${encodeURIComponent(
+          input.stageId ?? "",
+        )}/artifacts/${encodeURIComponent(input.path ?? "")}`,
+      ).then((data) => data.artifact),
+    enabled: enabled && Boolean(input.runId && input.stageId && input.path),
+  });
+}
+
+export function useSaveWorkflowStageArtifactMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      runId: string;
+      stageId: WizardStageId;
+      path: string;
+      content: string;
+      revision?: string | null;
+    }) =>
+      apiJson<{ artifact: WizardStageArtifactContent }>(
+        `/api/workflows/${encodeURIComponent(input.runId)}/stages/${encodeURIComponent(
+          input.stageId,
+        )}/artifacts/${encodeURIComponent(input.path)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            content: input.content,
+            revision: input.revision ?? null,
+          }),
+        },
+      ).then((data) => data.artifact),
+    onSuccess: (artifact, input) => {
+      queryClient.setQueryData(queryKeys.workflows.artifact(input.runId, input.path), artifact);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workflows.stages(input.runId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workflows.run(input.runId) });
+      invalidateProjectCaches(queryClient, artifact.projectId);
+    },
+  });
+}
+
+export function useValidateWorkflowStageMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { runId: string; stageId: WizardStageId }) =>
+      apiJson<{ validation: WizardStageValidationResult }>(
+        `/api/workflows/${encodeURIComponent(input.runId)}/stages/${encodeURIComponent(
+          input.stageId,
+        )}/validate`,
+        { method: "POST" },
+      ).then((data) => data.validation),
+    onSuccess: (validation, input) => {
+      queryClient.setQueryData(
+        queryKeys.workflows.validation(input.runId, input.stageId),
+        validation,
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workflows.stages(input.runId) });
+    },
   });
 }
 

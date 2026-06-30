@@ -924,7 +924,7 @@ async function handleAppApi(
   if (auth instanceof Response) return auth;
 
   try {
-    if (pathname === "/api/workflows/website-to-video" || /^\/api\/workflows\/[^/]+(?:\/(?:continue|cancel))?$/.test(pathname)) {
+    if (pathname === "/api/workflows/website-to-video" || pathname.startsWith("/api/workflows/")) {
       const tenant = requireTenantOrganization(auth);
       if (tenant) return tenant;
       return await handleWorkflowApi(env, req, pathname, auth, ctx);

@@ -209,4 +209,57 @@ describe("website-to-video workflow API", () => {
       },
     });
   });
+
+  it("returns an adaptive wizard stage plan for a workflow run", async () => {
+    mocks.selectRows = [[{
+      id: "run-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      projectId: null,
+      skillId: "website-to-video",
+      status: "succeeded",
+      phase: "complete",
+      inputUrl: "https://example.com/",
+      options: {},
+      progress: { current: 6, total: 6, label: "Complete" },
+      artifactManifest: {
+        runId: "run-1",
+        skillId: "website-to-video",
+        artifacts: [
+          {
+            path: "pipeline/website-to-video/run-1/DESIGN.md",
+            role: "design",
+            contentType: "text/markdown",
+            size: 20,
+            storage: { provider: "postgres", key: null },
+          },
+        ],
+        skippedSteps: [
+          { id: "voice", label: "Voiceover generation", reason: "Voice is not configured." },
+        ],
+      },
+      error: null,
+      createdAt: new Date("2026-06-29T12:00:00Z"),
+      updatedAt: new Date("2026-06-29T12:01:00Z"),
+      startedAt: null,
+      completedAt: new Date("2026-06-29T12:01:00Z"),
+    }]];
+
+    const response = await handleWorkerApi(
+      new Request("https://mf.test/api/workflows/run-1/stages"),
+      env,
+    );
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({
+      stagePlan: {
+        runId: "run-1",
+        workflowId: "website-to-video",
+        stages: expect.arrayContaining([
+          expect.objectContaining({ id: "design", status: "ready", editable: true }),
+          expect.objectContaining({ id: "vo-timing", status: "skipped" }),
+        ]),
+      },
+    });
+  });
 });

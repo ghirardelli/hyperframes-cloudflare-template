@@ -2,16 +2,20 @@ import { requireProjectAccess, type AppAuthContext } from "./auth-context";
 import { getHyperframesGuidelines, summarizeHtmlForAgent } from "./hyperframes-guidance";
 import {
   generateHyperframeTool,
+  applyWorkflowStagePatchTool,
   cancelHyperframesWorkflowTool,
   continueHyperframesWorkflowTool,
   getHyperframesWorkflowRunTool,
   getHyperframesGuidelinesTool,
+  inspectWorkflowStageTool,
   inspectProjectContextTool,
   listHyperframesSkillCatalogTool,
   loadHyperframesSkillTool,
   materializeHyperframeComponentsTool,
   preparePromptPackageTool,
   promptAgentResultSchema,
+  proposeWorkflowStagePatchTool,
+  rerunWorkflowStageValidationTool,
   routeHyperframesWorkflowTool,
   startHyperframesWorkflowTool,
   type GenerateHyperframeOutput,
@@ -35,7 +39,10 @@ import {
   cancelWebsiteToVideoWorkflowRun,
   continueWebsiteToVideoWorkflowRun,
   getWebsiteToVideoWorkflowRun,
+  getWorkflowWizardStagePlan,
+  saveWorkflowWizardStageArtifact,
   startWebsiteToVideoWorkflowRun,
+  validateWorkflowWizardStage,
 } from "../worker/workflow-api";
 
 export interface PromptAgentToolContext {
@@ -45,6 +52,8 @@ export interface PromptAgentToolContext {
   forwardedPrompt?: string;
   forwardedDurationSec?: number;
   forwardedActiveProjectTitle?: string;
+  forwardedWorkflowRunId?: string;
+  forwardedActiveWizardStageId?: string;
   forwardedGalleryContext?: SelectedGalleryPromptContext;
   generateHyperframe: (input: {
     prompt: string;
@@ -145,6 +154,45 @@ export function createPromptAgentServerTools() {
     cancelHyperframesWorkflowTool.server(async (args, execution) => {
       const runtime = requireRuntimeContext(execution?.context as PromptAgentToolContext | undefined);
       return cancelWebsiteToVideoWorkflowRun(runtime.env, runtime.auth, args.runId);
+    }),
+    inspectWorkflowStageTool.server(async (args, execution) => {
+      const runtime = requireRuntimeContext(execution?.context as PromptAgentToolContext | undefined);
+      const runId = args.runId || runtime.forwardedWorkflowRunId;
+      if (!runId) throw new Error("inspect_workflow_stage requires a workflow run");
+      const stagePlan = await getWorkflowWizardStagePlan(runtime.env, runtime.auth, runId);
+      const stageId = args.stageId || runtime.forwardedActiveWizardStageId;
+      const activeStage = stageId
+        ? stagePlan.stages.find((stage) => stage.id === stageId) ?? null
+        : stagePlan.stages.find((stage) => stage.id === stagePlan.activeStageId) ?? null;
+      return { stagePlan, activeStage };
+    }),
+    proposeWorkflowStagePatchTool.server(async (args, execution) => {
+      const runtime = requireRuntimeContext(execution?.context as PromptAgentToolContext | undefined);
+      const runId = args.runId || runtime.forwardedWorkflowRunId;
+      if (!runId) throw new Error("propose_workflow_stage_patch requires a workflow run");
+      await getWorkflowWizardStagePlan(runtime.env, runtime.auth, runId);
+      return {
+        runId,
+        stageId: args.stageId,
+        path: args.path,
+        summary: args.instructions,
+        requiresApproval: true as const,
+      };
+    }),
+    applyWorkflowStagePatchTool.server(async (args, execution) => {
+      const runtime = requireRuntimeContext(execution?.context as PromptAgentToolContext | undefined);
+      const runId = args.runId || runtime.forwardedWorkflowRunId;
+      if (!runId) throw new Error("apply_workflow_stage_patch requires a workflow run");
+      return saveWorkflowWizardStageArtifact(runtime.env, runtime.auth, runId, args.stageId, args.path, {
+        content: args.content,
+        revision: args.revision ?? null,
+      });
+    }),
+    rerunWorkflowStageValidationTool.server(async (args, execution) => {
+      const runtime = requireRuntimeContext(execution?.context as PromptAgentToolContext | undefined);
+      const runId = args.runId || runtime.forwardedWorkflowRunId;
+      if (!runId) throw new Error("rerun_workflow_stage_validation requires a workflow run");
+      return validateWorkflowWizardStage(runtime.env, runtime.auth, runId, args.stageId);
     }),
   ] as const;
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   findLatestGeneratedHyperframe,
+  findLatestStartedWorkflowRun,
   findLatestWorkflowRun,
   formatAgentToolState,
   promptAgentToolLabel,
@@ -128,6 +129,29 @@ describe("prompt agent client helpers", () => {
     ]);
 
     expect(match).toEqual({ key: "tool-call:workflow-call-1", output: workflowOutput });
+  });
+
+  it("finds only started workflow runs for wizard routing", () => {
+    const match = findLatestStartedWorkflowRun([
+      {
+        parts: [
+          {
+            type: "tool-call",
+            id: "status-call-1",
+            name: "get_hyperframes_workflow_run",
+            output: { ...workflowOutput, id: "status-run" },
+          },
+          {
+            type: "tool-call",
+            id: "start-call-1",
+            name: "start_hyperframes_workflow",
+            output: workflowOutput,
+          },
+        ],
+      },
+    ]);
+
+    expect(match).toEqual({ key: "tool-call:start-call-1", output: workflowOutput });
   });
 
   it("formats tool names, states, and previews for compact UI rendering", () => {

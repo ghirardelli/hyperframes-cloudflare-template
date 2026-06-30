@@ -82,6 +82,8 @@ export async function handlePromptAgentChat({
     forwardedPrompt: forwardedProps.currentPrompt,
     forwardedDurationSec: forwardedProps.durationSec,
     forwardedActiveProjectTitle: forwardedProps.activeProjectTitle,
+    forwardedWorkflowRunId: forwardedProps.workflowRunId,
+    forwardedActiveWizardStageId: forwardedProps.activeWizardStageId,
     forwardedGalleryContext: forwardedProps.selectedGalleryContext,
     generateHyperframe: async (input) =>
       generateHyperframeOutputSchema.parse(await generateHyperframe(input)),
@@ -138,6 +140,8 @@ function buildPromptAgentSystemPrompt(
 
 Active model: ${model}.
 ${activeProject ? `Active project: ${activeProject}.` : "No active project title was provided."}
+${forwardedProps.workflowRunId ? `Active workflow run: ${forwardedProps.workflowRunId}.` : "No active workflow run was provided."}
+${forwardedProps.activeWizardStageId ? `Active wizard stage: ${forwardedProps.activeWizardStageId}.` : "No active wizard stage was provided."}
 ${forwardedProps.durationSec ? `Selected duration: ${forwardedProps.durationSec} seconds.` : "No selected duration was provided; default to 6 seconds unless the user asks otherwise."}
 ${currentPrompt ? `Current editable prompt:\n${currentPrompt}` : "No editable prompt was provided."}
 ${galleryContext}
@@ -157,6 +161,7 @@ Rules:
 - If the selected route has fullPipelineAvailable=false and the website-to-video workflow runner is disabled, explicitly disclose that this app can prepare a catalog-informed prompt but cannot run the full HyperFrames workflow yet.
 - If the selected route is /website-to-video and the runner is available, offer start_hyperframes_workflow after explicit approval. Use get_hyperframes_workflow_run for status and summarize skipped steps honestly.
 - start_hyperframes_workflow, continue_hyperframes_workflow, and cancel_hyperframes_workflow require explicit user approval. get_hyperframes_workflow_run is read-only.
+- In the workflow wizard, use inspect_workflow_stage for read-only stage context. Use propose_workflow_stage_patch before suggesting edits to DESIGN.md, SCRIPT.md, STORYBOARD.md, or composition files. Use apply_workflow_stage_patch only after explicit user approval and include the full updated artifact content. Use rerun_workflow_stage_validation only after approval.
 - For /website-to-video, do not claim website capture, DESIGN.md, SCRIPT.md, STORYBOARD.md, voice/timing, multi-file build, lint/validate, snapshots, Studio delivery, stage video, or render completion unless a workflow run or render record actually reports that output.
 - Do not invent capture artifacts, project directories, narration files, validation snapshots, or Studio URLs.
 - When synced skills materially influence the result, include skillProvenance with workflowId, loadedSkillIds, sourceRevision, fullPipelineAvailable, and any capabilityNotice.

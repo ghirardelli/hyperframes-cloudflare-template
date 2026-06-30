@@ -1,10 +1,11 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { createDb } from "../db";
 import {
   projectEntries,
   projectEntryVersions,
+  projectFiles,
   projectMembers,
   projects,
   renders,
@@ -49,6 +50,19 @@ import {
 import { BunnyStreamClient, getBunnyStreamConfig, isBunnyStreamConfigured } from "../lib/bunny";
 import { normalizeProjectPath } from "../lib/project-paths";
 import { projectRenderArchiveKey, projectWorkspaceKey, writeProjectObject } from "../lib/project-storage";
+import {
+  buildWizardStagePlan,
+  isEditableWizardArtifactPath,
+  stageIdForArtifactPath,
+  wizardStageArtifactContentSchema,
+  wizardStageArtifactSaveSchema,
+  wizardStageIdSchema,
+  wizardStageValidationResultSchema,
+  type WizardStageArtifactContent,
+  type WizardStageId,
+  type WizardStagePlan,
+  type WizardStageValidationResult,
+} from "../lib/pipeline-wizard";
 import { upsertProjectFile } from "./studio-files-api";
 import type { WorkflowContainer } from "../container";
 import type { WorkerEnv } from "./render-api";
@@ -83,6 +97,55 @@ export async function handleWorkflowApi(
       const input = startWorkflowSchema.parse(await req.json().catch(() => ({})));
       const workflowRun = await startWebsiteToVideoWorkflowRun(env, auth, input, ctx);
       return Response.json({ workflowRun }, { status: 202 });
+    } catch (err) {
+      return workflowErrorResponse(err);
+    }
+  }
+
+  const stagesMatch = pathname.match(/^\/api\/workflows\/([^/]+)\/stages$/);
+  if (stagesMatch && req.method === "GET") {
+    try {
+      const stagePlan = await getWorkflowWizardStagePlan(env, auth, decodeURIComponent(stagesMatch[1]));
+      return Response.json({ stagePlan });
+    } catch (err) {
+      return workflowErrorResponse(err);
+    }
+  }
+
+  const stageValidationMatch = pathname.match(/^\/api\/workflows\/([^/]+)\/stages\/([^/]+)\/validate$/);
+  if (stageValidationMatch && req.method === "POST") {
+    try {
+      const result = await validateWorkflowWizardStage(
+        env,
+        auth,
+        decodeURIComponent(stageValidationMatch[1]),
+        decodeURIComponent(stageValidationMatch[2]),
+      );
+      return Response.json({ validation: result });
+    } catch (err) {
+      return workflowErrorResponse(err);
+    }
+  }
+
+  const stageArtifactMatch = pathname.match(/^\/api\/workflows\/([^/]+)\/stages\/([^/]+)\/artifacts\/(.+)$/);
+  if (stageArtifactMatch && (req.method === "GET" || req.method === "PATCH")) {
+    try {
+      const runId = decodeURIComponent(stageArtifactMatch[1]);
+      const stageId = decodeURIComponent(stageArtifactMatch[2]);
+      const path = decodeURIComponent(stageArtifactMatch[3]);
+      if (req.method === "GET") {
+        const artifact = await readWorkflowWizardStageArtifact(env, auth, runId, stageId, path);
+        return Response.json({ artifact });
+      }
+      const artifact = await saveWorkflowWizardStageArtifact(
+        env,
+        auth,
+        runId,
+        stageId,
+        path,
+        await req.json().catch(() => ({})),
+      );
+      return Response.json({ artifact });
     } catch (err) {
       return workflowErrorResponse(err);
     }
@@ -236,6 +299,121 @@ export async function cancelWebsiteToVideoWorkflowRun(
   return workflowRunToClient({ ...run, status: "cancelled", completedAt: now, updatedAt: now });
 }
 
+export async function getWorkflowWizardStagePlan(
+  env: WorkerEnv,
+  auth: AppAuthContext,
+  runId: string,
+): Promise<WizardStagePlan> {
+  const run = await getRunForOrg(env, auth, runId);
+  if (run.projectId) {
+    await requireProjectAccess(auth, run.projectId, env, "read");
+  }
+  return buildWizardStagePlan(workflowRunToClient(run));
+}
+
+export async function readWorkflowWizardStageArtifact(
+  env: WorkerEnv,
+  auth: AppAuthContext,
+  runId: string,
+  rawStageId: string,
+  rawPath: string,
+): Promise<WizardStageArtifactContent> {
+  const { run, stageId, path } = await resolveStageArtifact(env, auth, runId, rawStageId, rawPath, "read");
+  if (!run.projectId) throw new WorkflowApiError("workflow has no project artifacts yet", 409);
+  const db = createDb(env);
+  const artifact = await loadTextProjectArtifact(db, auth.organization.id, run.projectId, path);
+  if (!artifact) throw new WorkflowApiError("stage artifact not found", 404);
+  return wizardStageArtifactContentSchema.parse({
+    runId,
+    projectId: run.projectId,
+    stageId,
+    path,
+    content: artifact.content,
+    contentType: artifact.contentType,
+    revision: artifact.revision,
+    updatedAt: artifact.updatedAt,
+  });
+}
+
+export async function saveWorkflowWizardStageArtifact(
+  env: WorkerEnv,
+  auth: AppAuthContext,
+  runId: string,
+  rawStageId: string,
+  rawPath: string,
+  rawBody: unknown,
+): Promise<WizardStageArtifactContent> {
+  const body = wizardStageArtifactSaveSchema.parse(rawBody);
+  const { run, stageId, path, project } = await resolveStageArtifact(env, auth, runId, rawStageId, rawPath, "edit");
+  if (!run.projectId || !project) throw new WorkflowApiError("workflow has no project artifacts yet", 409);
+  if (!isEditableWizardArtifactPath(path)) throw new WorkflowApiError("stage artifact is not editable", 409);
+
+  const db = createDb(env);
+  const current = await loadTextProjectArtifact(db, auth.organization.id, run.projectId, path);
+  if (!current) throw new WorkflowApiError("stage artifact not found", 404);
+  if (body.revision && current.revision && body.revision !== current.revision) {
+    throw new WorkflowApiError("stage artifact changed since it was loaded", 409);
+  }
+
+  await upsertProjectFile(db, auth.organization.id, run.projectId, path, body.content);
+  if (path === "index.html") {
+    await db
+      .update(projects)
+      .set({ currentHtml: body.content, updatedAt: new Date() })
+      .where(and(eq(projects.id, run.projectId), eq(projects.organizationId, auth.organization.id)));
+  }
+
+  const bytes = new TextEncoder().encode(body.content);
+  const pointer = await writeProjectObject(env, {
+    key: projectWorkspaceKey({
+      organizationId: auth.organization.id,
+      ownerId: project.ownerId || auth.user.id,
+      projectId: run.projectId,
+      path,
+    }),
+    bytes,
+    contentType: mimeForPath(path),
+  });
+  await recordProjectEntry(env, auth, project, {
+    path,
+    content: body.content,
+    contentType: mimeForPath(path),
+    storage: pointer,
+  });
+
+  return await readWorkflowWizardStageArtifact(env, auth, runId, stageId, path);
+}
+
+export async function validateWorkflowWizardStage(
+  env: WorkerEnv,
+  auth: AppAuthContext,
+  runId: string,
+  rawStageId: string,
+): Promise<WizardStageValidationResult> {
+  const stageId = wizardStageIdSchema.parse(rawStageId);
+  const stagePlan = await getWorkflowWizardStagePlan(env, auth, runId);
+  const stage = stagePlan.stages.find((item) => item.id === stageId);
+  if (!stage) throw new WorkflowApiError("stage not found", 404);
+  const warnings = [stage.validationMessage, stage.skippedReason].filter((item): item is string => Boolean(item));
+  const status =
+    stage.status === "failed"
+      ? "failed"
+      : stage.status === "skipped" || stage.status === "unavailable"
+        ? "unavailable"
+        : warnings.length
+          ? "warning"
+          : stage.required && !stage.artifacts.length
+            ? "failed"
+            : "passed";
+  return wizardStageValidationResultSchema.parse({
+    runId,
+    stageId,
+    status,
+    checkedAt: new Date().toISOString(),
+    warnings,
+  });
+}
+
 export async function runWebsiteToVideoWorkflow(
   env: WorkerEnv,
   auth: AppAuthContext,
@@ -353,6 +531,97 @@ async function getRunForOrg(
     .limit(1);
   if (!rows[0]) throw new WorkflowApiError("workflow run not found", 404);
   return toWorkflowRunLike(rows[0]);
+}
+
+async function resolveStageArtifact(
+  env: WorkerEnv,
+  auth: AppAuthContext,
+  runId: string,
+  rawStageId: string,
+  rawPath: string,
+  permission: "read" | "edit",
+): Promise<{
+  run: WorkflowRunLike;
+  stageId: WizardStageId;
+  path: string;
+  project: typeof projects.$inferSelect | null;
+}> {
+  const run = await getRunForOrg(env, auth, runId);
+  const stageId = wizardStageIdSchema.parse(rawStageId);
+  const path = normalizeProjectPath(rawPath);
+  if (stageIdForArtifactPath(path) !== stageId) {
+    throw new WorkflowApiError("artifact does not belong to the requested stage", 400);
+  }
+  const plan = buildWizardStagePlan(workflowRunToClient(run));
+  const stage = plan.stages.find((item) => item.id === stageId);
+  if (!stage?.artifacts.some((artifact) => artifact.path === path)) {
+    throw new WorkflowApiError("stage artifact not found", 404);
+  }
+  const project = run.projectId ? await requireProjectAccess(auth, run.projectId, env, permission) : null;
+  return { run, stageId, path, project };
+}
+
+async function loadTextProjectArtifact(
+  db: ReturnType<typeof createDb>,
+  organizationId: string,
+  projectId: string,
+  path: string,
+): Promise<{
+  content: string;
+  contentType: string;
+  revision: string | null;
+  updatedAt: string | null;
+} | null> {
+  const entryRows = await db
+    .select({
+      textContent: projectEntries.textContent,
+      contentType: projectEntries.contentType,
+      updatedAt: projectEntries.updatedAt,
+    })
+    .from(projectEntries)
+    .where(
+      and(
+        eq(projectEntries.projectId, projectId),
+        eq(projectEntries.organizationId, organizationId),
+        eq(projectEntries.path, path),
+        isNull(projectEntries.deletedAt),
+      ),
+    )
+    .limit(1);
+  const entry = entryRows[0];
+  if (entry?.textContent != null) {
+    const updatedAt = isoOrNull(entry.updatedAt);
+    return {
+      content: entry.textContent,
+      contentType: entry.contentType ?? mimeForPath(path),
+      revision: updatedAt,
+      updatedAt,
+    };
+  }
+
+  const fileRows = await db
+    .select({
+      content: projectFiles.content,
+      updatedAt: projectFiles.updatedAt,
+    })
+    .from(projectFiles)
+    .where(
+      and(
+        eq(projectFiles.projectId, projectId),
+        eq(projectFiles.organizationId, organizationId),
+        eq(projectFiles.path, path),
+      ),
+    )
+    .limit(1);
+  const file = fileRows[0];
+  if (!file) return null;
+  const updatedAt = isoOrNull(file.updatedAt);
+  return {
+    content: file.content,
+    contentType: mimeForPath(path),
+    revision: updatedAt,
+    updatedAt,
+  };
 }
 
 function toWorkflowRunLike(row: Record<string, unknown>): WorkflowRunLike {
@@ -813,6 +1082,11 @@ function asDate(value: unknown): Date | null {
   return null;
 }
 
+function isoOrNull(value: Date | string | null): string | null {
+  if (!value) return null;
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
 function encodeBase64(content: string): string {
   const bytes = new TextEncoder().encode(content);
   let binary = "";
@@ -843,6 +1117,27 @@ function artifactRoleForPath(path: string): string {
   if (/renders?\//.test(path)) return "stage-video";
   if (path === "index.html" || path.endsWith(".html")) return "composition";
   return "workflow-artifact";
+}
+
+function mimeForPath(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  switch (ext) {
+    case "html":
+    case "htm":
+      return "text/html; charset=utf-8";
+    case "css":
+      return "text/css; charset=utf-8";
+    case "js":
+    case "mjs":
+      return "text/javascript; charset=utf-8";
+    case "json":
+      return "application/json; charset=utf-8";
+    case "md":
+    case "txt":
+      return "text/plain; charset=utf-8";
+    default:
+      return "application/octet-stream";
+  }
 }
 
 function formatForContentType(contentType: string): string {

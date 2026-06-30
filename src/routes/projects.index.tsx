@@ -1,5 +1,6 @@
 import { useQueries } from "@tanstack/react-query";
-import { FormEvent, useMemo, useState } from "react";
+import { useForm } from "@tanstack/react-form";
+import { useMemo, useState } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import {
   AlertCircle,
@@ -23,6 +24,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { messageFromError } from "@/lib/api-client";
+import { projectMetadataFormSchema } from "@/lib/form-schemas";
+import { fieldError, formSubmitHandler } from "@/lib/form-utils";
 import {
   projectRendersQueryOptions,
   useDeleteProjectMutation,
@@ -50,7 +53,6 @@ function ProjectsPage() {
   const renderQueries = useQueries({
     queries: projects.map((project) => projectRendersQueryOptions(project.id)),
   });
-  const updateProjectMutation = useUpdateProjectMetadataMutation();
   const deleteProjectMutation = useDeleteProjectMutation();
   const rendersByProject = useMemo(
     () =>
@@ -67,9 +69,6 @@ function ProjectsPage() {
     (projectsQuery.isSuccess && renderQueries.some((query) => query.isPending));
   const loadError = projectsQuery.isError ? messageFromError(projectsQuery.error) : "";
   const [editingId, setEditingId] = useState("");
-  const [draftTitle, setDraftTitle] = useState("");
-  const [draftDescription, setDraftDescription] = useState("");
-  const [savingId, setSavingId] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deletingId, setDeletingId] = useState("");
   const toast = useToast();
@@ -81,26 +80,6 @@ function ProjectsPage() {
 
   function beginEdit(project: Project) {
     setEditingId(project.id);
-    setDraftTitle(project.title?.trim() || "Untitled project");
-    setDraftDescription(project.description?.trim() || "");
-  }
-
-  async function saveMetadata(event: FormEvent<HTMLFormElement>, projectId: string) {
-    event.preventDefault();
-    try {
-      setSavingId(projectId);
-      await updateProjectMutation.mutateAsync({
-        projectId,
-        title: draftTitle,
-        description: draftDescription,
-      });
-      setEditingId("");
-      toast.success("Project updated.");
-    } catch (err) {
-      toast.error(messageFromError(err));
-    } finally {
-      setSavingId("");
-    }
   }
 
   function beginDelete(project: Project) {
@@ -195,53 +174,11 @@ function ProjectsPage() {
 
                       <div className="flex flex-1 flex-col gap-4 p-4">
                         {editing && project ? (
-                          <form
-                            className="space-y-3"
-                            onSubmit={(event) => saveMetadata(event, item.id)}
-                          >
-                            <div className="space-y-2">
-                              <Label htmlFor={`project-title-${item.id}`}>Name</Label>
-                              <Input
-                                id={`project-title-${item.id}`}
-                                value={draftTitle}
-                                onChange={(event) => setDraftTitle(event.target.value)}
-                                disabled={savingId === item.id}
-                                maxLength={120}
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor={`project-description-${item.id}`}>Description</Label>
-                              <Textarea
-                                id={`project-description-${item.id}`}
-                                value={draftDescription}
-                                onChange={(event) => setDraftDescription(event.target.value)}
-                                disabled={savingId === item.id}
-                                maxLength={260}
-                                rows={3}
-                                className="min-h-24"
-                              />
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <Button type="submit" size="sm" disabled={savingId === item.id}>
-                                {savingId === item.id ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                                ) : (
-                                  <Save className="h-4 w-4" aria-hidden="true" />
-                                )}
-                                Save
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setEditingId("")}
-                                disabled={savingId === item.id}
-                              >
-                                <X className="h-4 w-4" aria-hidden="true" />
-                                Cancel
-                              </Button>
-                            </div>
-                          </form>
+                          <ProjectMetadataForm
+                            project={project}
+                            onSaved={() => setEditingId("")}
+                            onCancel={() => setEditingId("")}
+                          />
                         ) : (
                           <>
                             <div className="min-w-0">
@@ -389,5 +326,116 @@ function ProjectsPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ProjectMetadataForm({
+  project,
+  onSaved,
+  onCancel,
+}: {
+  project: Project;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const updateProjectMutation = useUpdateProjectMetadataMutation();
+  const toast = useToast();
+  const form = useForm({
+    defaultValues: {
+      title: project.title?.trim() || "Untitled project",
+      description: project.description?.trim() || "",
+    },
+    validators: {
+      onSubmit: projectMetadataFormSchema,
+    },
+    onSubmit: async ({ value }) => {
+      const input = projectMetadataFormSchema.parse(value);
+      try {
+        await updateProjectMutation.mutateAsync({
+          projectId: project.id,
+          title: input.title,
+          description: input.description,
+        });
+        form.reset(input);
+        onSaved();
+        toast.success("Project updated.");
+      } catch (err) {
+        toast.error(messageFromError(err));
+      }
+    },
+  });
+
+  return (
+    <form className="space-y-3" onSubmit={formSubmitHandler(() => form.handleSubmit())}>
+      <form.Field name="title">
+        {(field) => {
+          const error = fieldError(field.state.meta);
+          return (
+            <div className="space-y-2">
+              <Label htmlFor={`project-title-${project.id}`}>Name</Label>
+              <Input
+                id={`project-title-${project.id}`}
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.value)}
+                disabled={updateProjectMutation.isPending}
+                maxLength={120}
+                aria-invalid={Boolean(error)}
+              />
+              {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            </div>
+          );
+        }}
+      </form.Field>
+      <form.Field name="description">
+        {(field) => {
+          const error = fieldError(field.state.meta);
+          return (
+            <div className="space-y-2">
+              <Label htmlFor={`project-description-${project.id}`}>Description</Label>
+              <Textarea
+                id={`project-description-${project.id}`}
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.value)}
+                disabled={updateProjectMutation.isPending}
+                maxLength={260}
+                rows={3}
+                className="min-h-24"
+                aria-invalid={Boolean(error)}
+              />
+              {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            </div>
+          );
+        }}
+      </form.Field>
+      <form.Subscribe selector={(state) => [state.canSubmit, state.isSubmitting, state.isDirty] as const}>
+        {([canSubmit, isSubmitting, isDirty]) => (
+          <div className="grid grid-cols-2 gap-2">
+            <Button type="submit" size="sm" disabled={!canSubmit || !isDirty || isSubmitting || updateProjectMutation.isPending}>
+              {isSubmitting || updateProjectMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Save className="h-4 w-4" aria-hidden="true" />
+              )}
+              Save
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                form.reset();
+                onCancel();
+              }}
+              disabled={isSubmitting || updateProjectMutation.isPending}
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+              Cancel
+            </Button>
+          </div>
+        )}
+      </form.Subscribe>
+    </form>
   );
 }

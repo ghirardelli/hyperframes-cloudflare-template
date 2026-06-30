@@ -1,58 +1,63 @@
-import { FormEvent, useState } from "react";
+import { useState } from "react";
+import { useForm } from "@tanstack/react-form";
 import { createFileRoute } from "@tanstack/react-router";
 import { ArrowRight, Film } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { fieldError, formSubmitHandler } from "@/lib/form-utils";
+import { loginFormSchema } from "@/lib/form-schemas";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
 });
 
 function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [status, setStatus] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const form = useForm({
+    defaultValues: {
+      email: "",
+      password: "",
+    },
+    validators: {
+      onSubmit: loginFormSchema,
+    },
+    onSubmit: async ({ value }) => {
+      const credentials = loginFormSchema.parse(value);
+      setStatus("");
+      try {
+        const response = await fetch("/api/auth/sign-in/email", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(credentials),
+        });
+        if (!response.ok) {
+          const data = (await response.json().catch(() => ({}))) as { message?: string; error?: string };
+          const message = data.message || data.error || "Unable to sign in.";
+          if (message.toLowerCase().includes("invalid email or password")) {
+            throw new Error(
+              "Invalid email or password. If this user was created in Better Auth Dash, make sure a password is set for the account.",
+            );
+          }
+          throw new Error(message);
+        }
 
-  async function signIn(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setIsSubmitting(true);
-    setStatus("");
-    try {
-      const response = await fetch("/api/auth/sign-in/email", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { message?: string; error?: string };
-        const message = data.message || data.error || "Unable to sign in.";
-        if (message.toLowerCase().includes("invalid email or password")) {
+        const profile = await fetch("/api/me", { headers: { accept: "application/json" } });
+        if (!profile.ok) {
+          const data = (await profile.json().catch(() => ({}))) as { message?: string; error?: string };
           throw new Error(
-            "Invalid email or password. If this user was created in Better Auth Dash, make sure a password is set for the account.",
+            data.message ||
+              data.error ||
+              "Sign-in succeeded, but this account is not assigned to a Motion Frames organization. Ask an admin to invite the user from the Motion Frames admin page.",
           );
         }
-        throw new Error(message);
+        window.location.assign("/");
+      } catch (err) {
+        setStatus(messageFromError(err));
       }
-
-      const profile = await fetch("/api/me", { headers: { accept: "application/json" } });
-      if (!profile.ok) {
-        const data = (await profile.json().catch(() => ({}))) as { message?: string; error?: string };
-        throw new Error(
-          data.message ||
-            data.error ||
-            "Sign-in succeeded, but this account is not assigned to a Motion Frames organization. Ask an admin to invite the user from the Motion Frames admin page.",
-        );
-      }
-      window.location.assign("/");
-    } catch (err) {
-      setStatus(messageFromError(err));
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
+    },
+  });
 
   return (
     <main className="min-h-dvh bg-white text-foreground">
@@ -71,31 +76,51 @@ function LoginPage() {
               Create a promo video, presentation deck, and more...
             </p>
 
-            <form className="mt-10 space-y-5" onSubmit={signIn}>
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="name@company.com"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Password"
-                  required
-                />
-              </div>
+            <form className="mt-10 space-y-5" onSubmit={formSubmitHandler(() => form.handleSubmit())}>
+              <form.Field name="email">
+                {(field) => {
+                  const error = fieldError(field.state.meta);
+                  return (
+                    <div className="space-y-2">
+                      <Label htmlFor={field.name}>Email</Label>
+                      <Input
+                        id={field.name}
+                        type="email"
+                        autoComplete="email"
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                        placeholder="name@company.com"
+                        required
+                        aria-invalid={Boolean(error)}
+                      />
+                      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+                    </div>
+                  );
+                }}
+              </form.Field>
+              <form.Field name="password">
+                {(field) => {
+                  const error = fieldError(field.state.meta);
+                  return (
+                    <div className="space-y-2">
+                      <Label htmlFor={field.name}>Password</Label>
+                      <Input
+                        id={field.name}
+                        type="password"
+                        autoComplete="current-password"
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                        placeholder="Password"
+                        required
+                        aria-invalid={Boolean(error)}
+                      />
+                      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+                    </div>
+                  );
+                }}
+              </form.Field>
 
               {status ? (
                 <p className="rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
@@ -103,10 +128,14 @@ function LoginPage() {
                 </p>
               ) : null}
 
-              <Button type="submit" size="lg" className="h-12 w-full text-[17px]" disabled={isSubmitting}>
-                {isSubmitting ? "Signing in..." : "Continue with email"}
-                <ArrowRight className="h-4 w-4" aria-hidden="true" />
-              </Button>
+              <form.Subscribe selector={(state) => [state.canSubmit, state.isSubmitting] as const}>
+                {([canSubmit, isSubmitting]) => (
+                  <Button type="submit" size="lg" className="h-12 w-full text-[17px]" disabled={!canSubmit || isSubmitting}>
+                    {isSubmitting ? "Signing in..." : "Continue with email"}
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                )}
+              </form.Subscribe>
             </form>
           </div>
         </section>

@@ -25,5 +25,21 @@ describe("queryKeys", () => {
       "run",
       "run-1",
     ]);
+    expect(queryKeys.workflows.stages("run-1")).toEqual([
+      "motion-frames",
+      "workflows",
+      "run",
+      "run-1",
+      "stages",
+    ]);
+    expect(queryKeys.workflows.artifact("run-1", "DESIGN.md")).toEqual([
+      "motion-frames",
+      "workflows",
+      "run",
+      "run-1",
+      "stages",
+      "artifact",
+      "DESIGN.md",
+    ]);
   });
 });

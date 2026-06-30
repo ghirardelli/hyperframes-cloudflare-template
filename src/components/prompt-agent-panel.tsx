@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useChat } from "@tanstack/ai-react";
 import { clientTools, fetchServerSentEvents } from "@tanstack/ai-client";
 import type { UIMessage } from "@tanstack/ai-client";
@@ -29,6 +30,7 @@ import {
 import type { SelectedGalleryPromptContext } from "@/lib/hyperframe-gallery-catalog";
 import {
   findLatestGeneratedHyperframe,
+  findLatestStartedWorkflowRun,
   findLatestWorkflowRun,
   formatAgentToolState,
   promptAgentToolLabel,
@@ -46,6 +48,8 @@ interface PromptAgentPanelProps {
   modelLabel: string;
   activeProjectId: string;
   activeProjectTitle: string;
+  workflowRunId?: string;
+  activeWizardStageId?: string;
   selectedGalleryContext: SelectedGalleryPromptContext;
   isGenerating: boolean;
   isRendering: boolean;
@@ -74,12 +78,15 @@ export function PromptAgentPanel({
   modelLabel,
   activeProjectId,
   activeProjectTitle,
+  workflowRunId,
+  activeWizardStageId,
   selectedGalleryContext,
   isGenerating,
   isRendering,
   onGenerated,
 }: PromptAgentPanelProps) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [agentInput, setAgentInput] = useState("");
   const [focusedSection, setFocusedSection] = useState<
     "chat" | "draft" | "checklist" | "approval" | "preview"
@@ -91,6 +98,8 @@ export function PromptAgentPanel({
     currentPrompt: prompt,
     durationSec,
     activeProjectTitle: activeProjectTitle || undefined,
+    workflowRunId,
+    activeWizardStageId,
     selectedGalleryContext,
   });
 
@@ -100,9 +109,11 @@ export function PromptAgentPanel({
       currentPrompt: prompt,
       durationSec,
       activeProjectTitle: activeProjectTitle || undefined,
+      workflowRunId,
+      activeWizardStageId,
       selectedGalleryContext,
     };
-  }, [activeProjectId, activeProjectTitle, durationSec, prompt, selectedGalleryContext]);
+  }, [activeProjectId, activeProjectTitle, activeWizardStageId, durationSec, prompt, selectedGalleryContext, workflowRunId]);
 
   const connection = useMemo(
     () =>
@@ -165,11 +176,23 @@ export function PromptAgentPanel({
     () => findLatestWorkflowRun(messages)?.output ?? null,
     [messages],
   );
+  const latestStartedWorkflowRun = useMemo(
+    () => findLatestStartedWorkflowRun(messages)?.output ?? null,
+    [messages],
+  );
   const workflowRunQuery = useWorkflowRunQuery(
     latestWorkflowRunFromMessages?.id,
     latestWorkflowRunFromMessages?.status,
   );
   const latestWorkflowRun = workflowRunQuery.data ?? latestWorkflowRunFromMessages;
+
+  useEffect(() => {
+    if (workflowRunId || !latestStartedWorkflowRun?.id) return;
+    void navigate({
+      to: "/workflows/$runId",
+      params: { runId: latestStartedWorkflowRun.id },
+    });
+  }, [latestStartedWorkflowRun?.id, navigate, workflowRunId]);
 
   useEffect(() => {
     if (latestWorkflowRun?.status !== "succeeded" || !latestWorkflowRun.projectId) return;
@@ -382,14 +405,22 @@ function WorkflowRunArtifact({ run }: { run: WorkflowRunOutput }) {
         </div>
       ) : null}
 
-      {run.studioUrl ? (
-        <Button asChild size="sm" variant="secondary" className="mt-3">
-          <a href={run.studioUrl}>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button asChild size="sm" variant="secondary">
+          <a href={`/workflows/${encodeURIComponent(run.id)}`}>
             <ExternalLink className="h-4 w-4" aria-hidden="true" />
-            Open Studio
+            Open Wizard
           </a>
         </Button>
-      ) : null}
+        {run.studioUrl ? (
+          <Button asChild size="sm" variant="outline">
+            <a href={run.studioUrl}>
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />
+              Open Studio
+            </a>
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }

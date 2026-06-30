@@ -13,6 +13,17 @@ import {
   materializeHyperframeComponentsToolInputSchema,
   materializeHyperframeComponentsToolOutputSchema,
 } from "./hyperframe-component-materializer-schema";
+import {
+  applyWorkflowStagePatchInputSchema,
+  inspectWorkflowStageInputSchema,
+  rerunWorkflowStageValidationInputSchema,
+  wizardStageArtifactContentSchema,
+  wizardStagePlanSchema,
+  wizardStageSchema,
+  wizardStageValidationResultSchema,
+  workflowStagePatchProposalSchema,
+  proposeWorkflowStagePatchInputSchema,
+} from "./pipeline-wizard";
 
 export const promptAgentForwardedPropsSchema = z.object({
   projectId: z.string().trim().min(1).max(200).optional(),
@@ -20,6 +31,8 @@ export const promptAgentForwardedPropsSchema = z.object({
   durationSec: z.number().min(1).max(300).optional(),
   activeProjectTitle: z.string().max(160).optional(),
   selectedGalleryContext: selectedGalleryPromptContextSchema.optional(),
+  workflowRunId: z.string().trim().min(1).max(200).optional(),
+  activeWizardStageId: z.string().trim().min(1).max(80).optional(),
 });
 
 export type PromptAgentForwardedProps = z.infer<typeof promptAgentForwardedPropsSchema>;
@@ -227,6 +240,11 @@ export const workflowRunLookupInputSchema = z.object({
   runId: z.string().trim().min(1).max(200),
 });
 
+export const inspectWorkflowStageOutputSchema = z.object({
+  stagePlan: wizardStagePlanSchema,
+  activeStage: wizardStageSchema.nullable(),
+});
+
 export const getHyperframesGuidelinesTool = toolDefinition({
   name: "get_hyperframes_guidelines",
   description: "Return the HyperFrames composition rules needed to prepare render-safe prompts.",
@@ -313,6 +331,36 @@ export const cancelHyperframesWorkflowTool = toolDefinition({
   description: "Cancel an approved queued, running, or awaiting-approval HyperFrames workflow run.",
   inputSchema: workflowRunLookupInputSchema,
   outputSchema: workflowRunClientSchema,
+  needsApproval: true,
+});
+
+export const inspectWorkflowStageTool = toolDefinition({
+  name: "inspect_workflow_stage",
+  description: "Read-only. Inspect the authorized wizard stage plan and active stage artifacts for a workflow run.",
+  inputSchema: inspectWorkflowStageInputSchema,
+  outputSchema: inspectWorkflowStageOutputSchema,
+});
+
+export const proposeWorkflowStagePatchTool = toolDefinition({
+  name: "propose_workflow_stage_patch",
+  description: "Read-only. Summarize a proposed bounded edit to an editable workflow stage artifact without mutating it.",
+  inputSchema: proposeWorkflowStagePatchInputSchema,
+  outputSchema: workflowStagePatchProposalSchema,
+});
+
+export const applyWorkflowStagePatchTool = toolDefinition({
+  name: "apply_workflow_stage_patch",
+  description: "Apply an approved full-content update to an editable workflow stage artifact.",
+  inputSchema: applyWorkflowStagePatchInputSchema,
+  outputSchema: wizardStageArtifactContentSchema,
+  needsApproval: true,
+});
+
+export const rerunWorkflowStageValidationTool = toolDefinition({
+  name: "rerun_workflow_stage_validation",
+  description: "Rerun validation for an approved workflow wizard stage.",
+  inputSchema: rerunWorkflowStageValidationInputSchema,
+  outputSchema: wizardStageValidationResultSchema,
   needsApproval: true,
 });
 
