@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
+  AlertCircle,
   Edit3,
   ExternalLink,
   Film,
@@ -9,6 +10,7 @@ import {
   Play,
   Save,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 
@@ -44,17 +46,21 @@ function ProjectsPage() {
     Record<string, Array<ProjectLibraryRender>>
   >({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [status, setStatus] = useState("");
   const [editingId, setEditingId] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [savingId, setSavingId] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
+  const [deletingId, setDeletingId] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
         setLoading(true);
+        setLoadError("");
         const data = await fetchJson<{ projects: Array<Project> }>("/api/projects");
         if (cancelled) return;
         setProjects(data.projects);
@@ -72,7 +78,7 @@ function ProjectsPage() {
         );
         if (!cancelled) setRendersByProject(Object.fromEntries(renderPairs));
       } catch (err) {
-        if (!cancelled) setStatus(messageFromError(err));
+        if (!cancelled) setLoadError(messageFromError(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -122,11 +128,39 @@ function ProjectsPage() {
     }
   }
 
+  function beginDelete(project: Project) {
+    setDeleteTarget(project);
+    setStatus("");
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    try {
+      setDeletingId(deleteTarget.id);
+      await fetchJson<{ ok: true }>(`/api/projects/${encodeURIComponent(deleteTarget.id)}`, {
+        method: "DELETE",
+      });
+      setProjects((current) => current.filter((project) => project.id !== deleteTarget.id));
+      setRendersByProject((current) => {
+        const next = { ...current };
+        delete next[deleteTarget.id];
+        return next;
+      });
+      setEditingId((current) => (current === deleteTarget.id ? "" : current));
+      setDeleteTarget(null);
+      setStatus("Project deleted.");
+    } catch (err) {
+      setStatus(messageFromError(err));
+    } finally {
+      setDeletingId("");
+    }
+  }
+
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground">
       <AppHeader active="projects" />
       <main className="w-full flex-1 px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+        <div className="flex w-full flex-col gap-6">
           <header className="flex flex-wrap items-end justify-between gap-4 border-b border-hairline pb-5">
             <div>
               <p className="text-sm font-medium text-muted-foreground">Library</p>
@@ -147,8 +181,21 @@ function ProjectsPage() {
                 Loading projects
               </div>
             </section>
+          ) : loadError ? (
+            <section className="grid min-h-[28rem] place-items-center rounded-lg border border-hairline bg-surface-card px-4 text-center">
+              <div className="max-w-xl">
+                <AlertCircle className="mx-auto h-10 w-10 text-destructive" aria-hidden="true" />
+                <h2 className="mt-4 text-2xl font-semibold">Unable to load projects</h2>
+                <p className="mt-2 break-words text-sm leading-6 text-muted-foreground">
+                  {loadError}
+                </p>
+                <Button type="button" className="mt-5" onClick={() => window.location.reload()}>
+                  Try again
+                </Button>
+              </div>
+            </section>
           ) : items.length ? (
-            <section className="grid auto-rows-[minmax(22rem,auto)] grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <section className="grid auto-rows-[minmax(22rem,auto)] grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 min-[1800px]:grid-cols-5">
               {items.map((item) => {
                 const project = projects.find((current) => current.id === item.id);
                 const editing = editingId === item.id;
@@ -234,15 +281,29 @@ function ProjectsPage() {
                                   {item.title}
                                 </h2>
                                 {project ? (
-                                  <Button
-                                    type="button"
-                                    size="icon"
-                                    variant="ghost"
-                                    aria-label={`Edit ${item.title}`}
-                                    onClick={() => beginEdit(project)}
-                                  >
-                                    <Edit3 className="h-4 w-4" aria-hidden="true" />
-                                  </Button>
+                                  <div className="flex shrink-0 items-center gap-1">
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="ghost"
+                                      aria-label={`Edit ${item.title}`}
+                                      onClick={() => beginEdit(project)}
+                                      disabled={deletingId === item.id}
+                                    >
+                                      <Edit3 className="h-4 w-4" aria-hidden="true" />
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="ghost"
+                                      aria-label={`Delete ${item.title}`}
+                                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                      onClick={() => beginDelete(project)}
+                                      disabled={deletingId === item.id}
+                                    >
+                                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                                    </Button>
+                                  </div>
                                 ) : null}
                               </div>
                               <p className="mt-2 line-clamp-3 min-h-16 text-sm leading-6 text-muted-foreground">
@@ -306,6 +367,61 @@ function ProjectsPage() {
           ) : null}
         </div>
       </main>
+
+      {deleteTarget ? (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/45 px-4 py-6">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-project-title"
+            className="w-full max-w-lg rounded-lg border border-hairline bg-background p-5 shadow-2xl"
+          >
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-destructive/10 text-destructive">
+                <Trash2 className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <div className="min-w-0">
+                <h2 id="delete-project-title" className="text-xl font-semibold">
+                  Delete {deleteTarget.title?.trim() || "Untitled project"}?
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  This action is irreversible and permanent. It will delete all information about this
+                  project in the database and any stored files or folders in R2 storage, Bunny.net
+                  Storage, and Bunny Stream.
+                </p>
+              </div>
+            </div>
+            {status ? (
+              <p className="mt-4 break-words rounded-md border border-hairline bg-surface-card px-3 py-2 text-sm text-muted-foreground">
+                {status}
+              </p>
+            ) : null}
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDeleteTarget(null)}
+                disabled={deletingId === deleteTarget.id}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                className="bg-destructive text-white hover:bg-destructive/90"
+                onClick={() => void confirmDelete()}
+                disabled={deletingId === deleteTarget.id}
+              >
+                {deletingId === deleteTarget.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                )}
+                Delete permanently
+              </Button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

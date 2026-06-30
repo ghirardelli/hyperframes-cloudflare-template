@@ -67,6 +67,30 @@ describe("Bunny clients", () => {
     );
   });
 
+  it("deletes Stream videos with the library AccessKey", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response("ok"));
+    const client = new BunnyStreamClient(
+      {
+        libraryId: "123",
+        accessKey: "stream-secret",
+        apiBase: "https://video.bunnycdn.com",
+      },
+      fetcher as typeof fetch,
+    );
+
+    await client.deleteVideo("video-1");
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://video.bunnycdn.com/library/123/videos/video-1",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.any(Object),
+      }),
+    );
+    const init = (fetcher.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect((init.headers as Record<string, string>).AccessKey).toBe("stream-secret");
+  });
+
   it("returns null for fully absent Bunny config and parses configured env", () => {
     expect(getBunnyStorageConfig({})).toBeNull();
     expect(getBunnyStreamConfig({})).toBeNull();

@@ -1,5 +1,5 @@
 import { getContainer } from "@cloudflare/containers";
-import { and, desc, eq, ilike, isNull, or } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 
 import { createAuth } from "../auth";
 import manifest from "../composition-manifest.json";
@@ -8,6 +8,7 @@ import { createDb } from "../db";
 import {
   organizationMemberships,
   organizations,
+  projectAssets,
   projectEntries,
   projectEntryVersions,
   projectMembers,
@@ -19,6 +20,7 @@ import {
   renders,
   sessions,
   users,
+  workflowRuns,
 } from "../db/schema";
 import {
   AuthRequiredError,
@@ -34,13 +36,18 @@ import {
 import {
   BunnyApiError,
   BunnyStreamClient,
+  getBunnyStorageConfig,
   getBunnyStreamConfig,
   isBunnyStreamConfigured,
   type BunnyEnv,
 } from "../lib/bunny";
 import { DEFAULT_MODEL, generateComposition, GenerateError } from "../lib/generate";
 import { normalizeProjectPath } from "../lib/project-paths";
-import { projectRenderArchiveKey, writeProjectObject } from "../lib/project-storage";
+import {
+  deleteProjectObject,
+  projectRenderArchiveKey,
+  writeProjectObject,
+} from "../lib/project-storage";
 import { handleStudioFilesApi, renderProjectPreview, upsertProjectFile } from "./studio-files-api";
 import { handlePromptAgentChat } from "./prompt-agent-api";
 import { handleWorkflowApi, type WorkflowExecutionContext } from "./workflow-api";
@@ -879,6 +886,7 @@ async function handleAppApi(
       if (tenant) return tenant;
       if (req.method === "GET") return await handleGetProject(env, auth, projectMatch[1]);
       if (req.method === "PATCH") return await handleUpdateProject(env, req, auth, projectMatch[1]);
+      if (req.method === "DELETE") return await handleDeleteProject(env, auth, projectMatch[1]);
     }
 
     const projectPreviewMatch = pathname.match(/^\/api\/projects\/([^/]+)\/preview$/);
@@ -1148,14 +1156,14 @@ async function handleListProjects(
   const db = createDb(env);
   if (isOrganizationAdmin(context)) {
     const rows = await db
-      .select()
+      .select(projectLibrarySelection)
       .from(projects)
       .where(eq(projects.organizationId, context.organization.id))
       .orderBy(desc(projects.updatedAt));
     return Response.json({ projects: rows });
   }
   const rows = await db
-    .select({ project: projects })
+    .select(projectLibrarySelection)
     .from(projects)
     .leftJoin(
       projectMembers,
@@ -1172,8 +1180,23 @@ async function handleListProjects(
       ),
     )
     .orderBy(desc(projects.updatedAt));
-  return Response.json({ projects: rows.map((row) => row.project) });
+  return Response.json({ projects: rows });
 }
+
+const projectLibrarySelection = {
+  id: projects.id,
+  organizationId: projects.organizationId,
+  ownerId: projects.ownerId,
+  title: projects.title,
+  description: sql<string | null>`to_jsonb(${projects}) ->> 'description'`,
+  durationSec: projects.durationSec,
+  status: projects.status,
+  visibility: projects.visibility,
+  sharedById: projects.sharedById,
+  sharedAt: projects.sharedAt,
+  createdAt: projects.createdAt,
+  updatedAt: projects.updatedAt,
+};
 
 async function handleCreateProject(
   env: WorkerEnv,
@@ -1204,6 +1227,167 @@ async function handleGetProject(
 ): Promise<Response> {
   const project = await requireProjectAccess(context, projectId, env);
   return Response.json({ project });
+}
+
+async function handleDeleteProject(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  projectId: string,
+): Promise<Response> {
+  const project = await requireProjectAccess(context, projectId, env, "share");
+  await deleteProjectExternalResources(env, context, project.id);
+  const db = createDb(env);
+  await db
+    .delete(renders)
+    .where(and(eq(renders.projectId, project.id), eq(renders.organizationId, context.organization.id)));
+  await db
+    .delete(workflowRuns)
+    .where(and(eq(workflowRuns.projectId, project.id), eq(workflowRuns.organizationId, context.organization.id)));
+  await db
+    .delete(projects)
+    .where(and(eq(projects.id, project.id), eq(projects.organizationId, context.organization.id)));
+  return Response.json({ ok: true });
+}
+
+async function deleteProjectExternalResources(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  projectId: string,
+): Promise<void> {
+  const db = createDb(env);
+  const objects = new Map<string, { provider: "r2" | "bunny-storage"; key: string }>();
+  const streamVideoIds = new Set<string>();
+
+  const assetRows = await db
+    .select({
+      r2Key: projectAssets.r2Key,
+      storageProvider: projectAssets.storageProvider,
+      storageKey: projectAssets.storageKey,
+    })
+    .from(projectAssets)
+    .where(and(eq(projectAssets.projectId, projectId), eq(projectAssets.organizationId, context.organization.id)));
+  for (const row of assetRows) {
+    addStoredObject(objects, row.storageProvider, row.storageKey ?? row.r2Key);
+    if (row.r2Key) addStoredObject(objects, "r2", row.r2Key);
+  }
+
+  const entryRows = await db
+    .select({
+      storageProvider: projectEntries.storageProvider,
+      storageKey: projectEntries.storageKey,
+      streamVideoId: projectEntries.streamVideoId,
+    })
+    .from(projectEntries)
+    .where(and(eq(projectEntries.projectId, projectId), eq(projectEntries.organizationId, context.organization.id)));
+  for (const row of entryRows) {
+    addStoredObject(objects, row.storageProvider, row.storageKey);
+    addStreamVideoId(streamVideoIds, row.streamVideoId);
+    if (row.storageProvider === "bunny-stream") addStreamVideoId(streamVideoIds, row.storageKey);
+  }
+
+  const versionRows = await db
+    .select({
+      storageProvider: projectEntryVersions.storageProvider,
+      storageKey: projectEntryVersions.storageKey,
+    })
+    .from(projectEntryVersions)
+    .where(and(eq(projectEntryVersions.projectId, projectId), eq(projectEntryVersions.organizationId, context.organization.id)));
+  for (const row of versionRows) {
+    addStoredObject(objects, row.storageProvider, row.storageKey);
+    if (row.storageProvider === "bunny-stream") addStreamVideoId(streamVideoIds, row.storageKey);
+  }
+
+  const renderRows = await db
+    .select({
+      r2Key: renders.r2Key,
+      storageProvider: renders.storageProvider,
+      storageKey: renders.storageKey,
+      bunnyStorageKey: renders.bunnyStorageKey,
+      streamVideoId: renders.streamVideoId,
+    })
+    .from(renders)
+    .where(and(eq(renders.projectId, projectId), eq(renders.organizationId, context.organization.id)));
+  for (const row of renderRows) {
+    addStoredObject(objects, row.storageProvider, row.storageKey ?? row.r2Key);
+    if (row.r2Key) addStoredObject(objects, "r2", row.r2Key);
+    addStoredObject(objects, "bunny-storage", row.bunnyStorageKey);
+    addStreamVideoId(streamVideoIds, row.streamVideoId);
+    if (row.storageProvider === "bunny-stream") addStreamVideoId(streamVideoIds, row.storageKey);
+  }
+
+  const workflowRows = await db
+    .select({ artifactManifest: workflowRuns.artifactManifest })
+    .from(workflowRuns)
+    .where(and(eq(workflowRuns.projectId, projectId), eq(workflowRuns.organizationId, context.organization.id)));
+  for (const row of workflowRows) {
+    collectManifestStorage(row.artifactManifest, objects, streamVideoIds);
+  }
+
+  if ([...objects.values()].some((object) => object.provider === "bunny-storage") && !getBunnyStorageConfig(env)) {
+    throw new Error("Bunny Storage is required to delete this project's stored files.");
+  }
+  const stream =
+    streamVideoIds.size > 0
+      ? (() => {
+          const streamConfig = getBunnyStreamConfig(env);
+          if (!streamConfig) {
+            throw new Error("Bunny Stream is required to delete this project's Stream videos.");
+          }
+          return new BunnyStreamClient(streamConfig);
+        })()
+      : null;
+
+  for (const object of objects.values()) {
+    await deleteProjectObject(env, object);
+  }
+
+  if (!stream) return;
+  for (const videoId of streamVideoIds) {
+    try {
+      await stream.deleteVideo(videoId);
+    } catch (err) {
+      if (err instanceof BunnyApiError && err.status === 404) continue;
+      throw err;
+    }
+  }
+}
+
+function addStoredObject(
+  objects: Map<string, { provider: "r2" | "bunny-storage"; key: string }>,
+  provider: string | null | undefined,
+  key: string | null | undefined,
+): void {
+  if (!key) return;
+  if (provider !== "r2" && provider !== "bunny-storage") return;
+  objects.set(`${provider}:${key}`, { provider, key });
+}
+
+function addStreamVideoId(streamVideoIds: Set<string>, videoId: string | null | undefined): void {
+  if (videoId) streamVideoIds.add(videoId);
+}
+
+function collectManifestStorage(
+  value: unknown,
+  objects: Map<string, { provider: "r2" | "bunny-storage"; key: string }>,
+  streamVideoIds: Set<string>,
+): void {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectManifestStorage(item, objects, streamVideoIds);
+    return;
+  }
+  const record = value as Record<string, unknown>;
+  const provider = typeof record.provider === "string" ? record.provider : null;
+  const key = typeof record.key === "string" ? record.key : null;
+  const streamVideoId =
+    typeof record.streamVideoId === "string"
+      ? record.streamVideoId
+      : provider === "bunny-stream"
+        ? key
+        : null;
+  addStoredObject(objects, provider, key);
+  addStreamVideoId(streamVideoIds, streamVideoId);
+  for (const item of Object.values(record)) collectManifestStorage(item, objects, streamVideoIds);
 }
 
 async function handleProjectSearch(

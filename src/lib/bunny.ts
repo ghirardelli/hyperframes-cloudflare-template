@@ -218,6 +218,16 @@ export class BunnyStreamClient {
     return (await res.json()) as BunnyStreamVideo;
   }
 
+  async deleteVideo(videoId: string): Promise<void> {
+    await this.request(
+      `${this.config.apiBase}/library/${encodeURIComponent(this.config.libraryId)}/videos/${encodeURIComponent(videoId)}`,
+      {
+        method: "DELETE",
+        headers: { AccessKey: this.config.accessKey },
+      },
+    );
+  }
+
   embedUrl(videoId: string): string {
     const host = this.config.embedHostname || "iframe.mediadelivery.net";
     return `https://${host}/embed/${encodeURIComponent(this.config.libraryId)}/${encodeURIComponent(videoId)}`;

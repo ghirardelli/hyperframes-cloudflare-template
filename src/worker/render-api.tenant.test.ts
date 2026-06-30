@@ -18,13 +18,21 @@ vi.mock("../lib/generate", () => ({
 }));
 
 const apiMocks = vi.hoisted(() => ({
+  tableName: (table: unknown): string => {
+    const symbol = Object.getOwnPropertySymbols(table as object).find(
+      (item) => item.toString() === "Symbol(drizzle:Name)",
+    );
+    return symbol ? String((table as Record<symbol, unknown>)[symbol]) : "";
+  },
   requireAuthContext: vi.fn(),
   createUser: vi.fn(),
   changePassword: vi.fn(),
+  selectShapes: [] as Array<unknown>,
   selectRows: [] as Array<Array<Record<string, unknown>>>,
   returningRows: [] as Array<Array<Record<string, unknown>>>,
   inserts: [] as Array<{ values: Record<string, unknown> }>,
   updates: [] as Array<{ values: Record<string, unknown> }>,
+  deletes: [] as Array<{ table: string }>,
 }));
 
 function nextSelectRows() {
@@ -35,7 +43,8 @@ function nextReturningRows(fallback: Record<string, unknown>) {
   return Promise.resolve(apiMocks.returningRows.shift() ?? [fallback]);
 }
 
-function selectChain() {
+function selectChain(shape?: unknown) {
+  apiMocks.selectShapes.push(shape);
   const chain = {
     from: vi.fn(() => chain),
     innerJoin: vi.fn(() => chain),
@@ -43,6 +52,9 @@ function selectChain() {
     where: vi.fn(() => chain),
     orderBy: vi.fn(nextSelectRows),
     limit: vi.fn(nextSelectRows),
+    then: vi.fn((resolve: (value: Array<Record<string, unknown>>) => unknown, reject?: (reason: unknown) => unknown) =>
+      nextSelectRows().then(resolve, reject),
+    ),
   };
   return chain;
 }
@@ -75,8 +87,11 @@ vi.mock("../db", () => ({
       }),
     })),
     update: vi.fn(updateChain),
-    delete: vi.fn(() => ({
-      where: vi.fn(() => Promise.resolve()),
+    delete: vi.fn((table: unknown) => ({
+      where: vi.fn(() => {
+        apiMocks.deletes.push({ table: apiMocks.tableName(table) });
+        return Promise.resolve();
+      }),
     })),
   }),
 }));
@@ -139,13 +154,16 @@ const memberContext = {
 
 describe("tenant-aware worker APIs", () => {
   beforeEach(() => {
+    vi.unstubAllGlobals();
     apiMocks.requireAuthContext.mockReset();
     apiMocks.createUser.mockReset();
     apiMocks.changePassword.mockReset();
+    apiMocks.selectShapes = [];
     apiMocks.selectRows = [];
     apiMocks.returningRows = [];
     apiMocks.inserts = [];
     apiMocks.updates = [];
+    apiMocks.deletes = [];
   });
 
   it("creates invited users in an existing organization", async () => {
@@ -321,6 +339,126 @@ describe("tenant-aware worker APIs", () => {
       userId: "user-1",
       role: "owner",
     });
+  });
+
+  it("lists projects with a library-sized selection instead of full project rows", async () => {
+    apiMocks.requireAuthContext.mockResolvedValue(memberContext);
+    apiMocks.selectRows = [
+      [
+        {
+          id: "project-1",
+          organizationId: "org-1",
+          ownerId: "user-1",
+          title: "Launch reel",
+          description: "A short launch-week edit",
+          durationSec: 6,
+          status: "draft",
+          visibility: "private",
+          createdAt: new Date("2026-06-30T12:00:00Z"),
+          updatedAt: new Date("2026-06-30T12:30:00Z"),
+        },
+      ],
+    ];
+
+    const response = await handleWorkerApi(
+      new Request("https://motion-frames.test/api/projects"),
+      baseEnv,
+    );
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toEqual({
+      projects: [
+        expect.objectContaining({
+          id: "project-1",
+          title: "Launch reel",
+          description: "A short launch-week edit",
+        }),
+      ],
+    });
+    expect(apiMocks.selectShapes[0]).toEqual(
+      expect.objectContaining({
+        id: expect.anything(),
+        title: expect.anything(),
+        description: expect.anything(),
+        updatedAt: expect.anything(),
+      }),
+    );
+    expect(apiMocks.selectShapes[0]).not.toHaveProperty("currentHtml");
+    expect(apiMocks.selectShapes[0]).not.toHaveProperty("prompt");
+  });
+
+  it("deletes project database rows and stored project artifacts permanently", async () => {
+    apiMocks.requireAuthContext.mockResolvedValue(memberContext);
+    const fetchMock = vi.fn(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const r2Delete = vi.fn(async () => undefined);
+    apiMocks.selectRows = [
+      [{ id: "project-1", organizationId: "org-1", ownerId: "user-1", title: "Launch reel", visibility: "private" }],
+      [
+        { r2Key: "assets/orgs/org-1/users/user-1/projects/project-1/workspace/assets/logo.png", storageProvider: "r2", storageKey: null },
+        { r2Key: null, storageProvider: "bunny-storage", storageKey: "orgs/org-1/users/user-1/projects/project-1/workspace/assets/hero.png" },
+      ],
+      [
+        { storageProvider: "bunny-storage", storageKey: "orgs/org-1/users/user-1/projects/project-1/workspace/DESIGN.md", streamVideoId: null },
+        { storageProvider: "bunny-stream", storageKey: "stream-entry", streamVideoId: "stream-entry" },
+      ],
+      [
+        { storageProvider: "bunny-storage", storageKey: "orgs/org-1/users/user-1/projects/project-1/versions/v1/index.html", streamVideoId: null },
+      ],
+      [
+        { r2Key: "renders/org-1/render.mp4", storageProvider: "r2", storageKey: "renders/org-1/render.mp4", bunnyStorageKey: null, streamVideoId: null },
+        { r2Key: null, storageProvider: "bunny-stream", storageKey: "stream-render", bunnyStorageKey: "orgs/org-1/users/user-1/projects/project-1/renders/render-2/output.mp4", streamVideoId: "stream-render" },
+      ],
+      [
+        {
+          artifactManifest: {
+            artifacts: [
+              { storage: { provider: "bunny-storage", key: "orgs/org-1/users/user-1/projects/project-1/workspace/workflow.txt" } },
+              { storage: { provider: "bunny-stream", key: "stream-workflow", streamVideoId: "stream-workflow" } },
+            ],
+          },
+        },
+      ],
+    ];
+
+    const response = await handleWorkerApi(
+      new Request("https://motion-frames.test/api/projects/project-1", {
+        method: "DELETE",
+      }),
+      {
+        ...baseEnv,
+        RENDERS: { delete: r2Delete },
+        BUNNY_STORAGE_ZONE_NAME: "zone",
+        BUNNY_STORAGE_ACCESS_KEY: "storage-secret",
+        BUNNY_STORAGE_ENDPOINT: "https://la.storage.bunnycdn.com",
+        BUNNY_STREAM_LIBRARY_ID: "123",
+        BUNNY_STREAM_ACCESS_KEY: "stream-secret",
+        BUNNY_STREAM_API_BASE: "https://video.bunnycdn.com",
+      } as unknown as WorkerEnv,
+    );
+
+    const body = await response?.json();
+    expect(response?.status).toBe(200);
+    expect(body).toEqual({ ok: true });
+    expect(r2Delete).toHaveBeenCalledWith("assets/orgs/org-1/users/user-1/projects/project-1/workspace/assets/logo.png");
+    expect(r2Delete).toHaveBeenCalledWith("renders/org-1/render.mp4");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://la.storage.bunnycdn.com/zone/orgs/org-1/users/user-1/projects/project-1/workspace/assets/hero.png",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://video.bunnycdn.com/library/123/videos/stream-render",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://video.bunnycdn.com/library/123/videos/stream-workflow",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(apiMocks.deletes.map((item) => item.table)).toEqual([
+      "renders",
+      "workflow_runs",
+      "projects",
+    ]);
   });
 
   it("lets a project owner share with the organization and records an audit row", async () => {

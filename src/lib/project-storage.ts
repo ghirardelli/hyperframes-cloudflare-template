@@ -1,4 +1,11 @@
-import { BunnyStorageClient, getBunnyStorageConfig, sha256Hex, type BunnyEnv } from "./bunny";
+import {
+  BunnyApiError,
+  BunnyConfigError,
+  BunnyStorageClient,
+  getBunnyStorageConfig,
+  sha256Hex,
+  type BunnyEnv,
+} from "./bunny";
 import { basename } from "./project-paths";
 
 export type StorageProvider = "postgres" | "r2" | "bunny-storage" | "bunny-stream";
@@ -94,6 +101,31 @@ export async function readProjectObject(
     return new Response(object.body, { headers });
   }
   return null;
+}
+
+export async function deleteProjectObject(
+  env: StorageEnv,
+  pointer: StoredObjectPointer,
+): Promise<void> {
+  if (!pointer.key) return;
+  if (pointer.provider === "bunny-storage") {
+    const config = getBunnyStorageConfig(env);
+    if (!config) {
+      throw new BunnyConfigError(
+        "Bunny Storage is required to delete this project's stored files.",
+      );
+    }
+    try {
+      await new BunnyStorageClient(config).deleteFile(pointer.key);
+    } catch (err) {
+      if (err instanceof BunnyApiError && err.status === 404) return;
+      throw err;
+    }
+    return;
+  }
+  if (pointer.provider === "r2") {
+    await env.RENDERS.delete(pointer.key);
+  }
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
