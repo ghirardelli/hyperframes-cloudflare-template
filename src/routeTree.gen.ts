@@ -15,6 +15,7 @@ import { Route as PlaygroundRouteImport } from './routes/playground'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
 import { Route as ProjectsProjectIdStudioRouteImport } from './routes/projects.$projectId.studio'
 
 const ProjectsRoute = ProjectsRouteImport.update({
@@ -47,6 +48,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ProjectsRoute,
+} as any)
 const ProjectsProjectIdStudioRoute = ProjectsProjectIdStudioRouteImport.update({
   id: '/$projectId/studio',
   path: '/$projectId/studio',
@@ -60,6 +66,7 @@ export interface FileRoutesByFullPath {
   '/playground': typeof PlaygroundRoute
   '/profile': typeof ProfileRoute
   '/projects': typeof ProjectsRouteWithChildren
+  '/projects/': typeof ProjectsIndexRoute
   '/projects/$projectId/studio': typeof ProjectsProjectIdStudioRoute
 }
 export interface FileRoutesByTo {
@@ -68,7 +75,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/playground': typeof PlaygroundRoute
   '/profile': typeof ProfileRoute
-  '/projects': typeof ProjectsRouteWithChildren
+  '/projects': typeof ProjectsIndexRoute
   '/projects/$projectId/studio': typeof ProjectsProjectIdStudioRoute
 }
 export interface FileRoutesById {
@@ -79,6 +86,7 @@ export interface FileRoutesById {
   '/playground': typeof PlaygroundRoute
   '/profile': typeof ProfileRoute
   '/projects': typeof ProjectsRouteWithChildren
+  '/projects/': typeof ProjectsIndexRoute
   '/projects/$projectId/studio': typeof ProjectsProjectIdStudioRoute
 }
 export interface FileRouteTypes {
@@ -90,6 +98,7 @@ export interface FileRouteTypes {
     | '/playground'
     | '/profile'
     | '/projects'
+    | '/projects/'
     | '/projects/$projectId/studio'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -108,6 +117,7 @@ export interface FileRouteTypes {
     | '/playground'
     | '/profile'
     | '/projects'
+    | '/projects/'
     | '/projects/$projectId/studio'
   fileRoutesById: FileRoutesById
 }
@@ -164,6 +174,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects/': {
+      id: '/projects/'
+      path: '/'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof ProjectsIndexRouteImport
+      parentRoute: typeof ProjectsRoute
+    }
     '/projects/$projectId/studio': {
       id: '/projects/$projectId/studio'
       path: '/$projectId/studio'
@@ -175,10 +192,12 @@ declare module '@tanstack/react-router' {
 }
 
 interface ProjectsRouteChildren {
+  ProjectsIndexRoute: typeof ProjectsIndexRoute
   ProjectsProjectIdStudioRoute: typeof ProjectsProjectIdStudioRoute
 }
 
 const ProjectsRouteChildren: ProjectsRouteChildren = {
+  ProjectsIndexRoute: ProjectsIndexRoute,
   ProjectsProjectIdStudioRoute: ProjectsProjectIdStudioRoute,
 }
 
