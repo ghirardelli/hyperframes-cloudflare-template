@@ -107,6 +107,7 @@ export const projects = pgTable("projects", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
+  description: text("description"),
   prompt: text("prompt"),
   currentHtml: text("current_html"),
   durationSec: integer("duration_sec").notNull().default(6),

@@ -3,7 +3,7 @@ import { Film, LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
-type NavKey = "workspace" | "playground" | "admin" | "profile";
+type NavKey = "workspace" | "projects" | "playground" | "admin" | "profile";
 
 interface MeResponse {
   user: { role?: string | null };
@@ -12,6 +12,7 @@ interface MeResponse {
 
 const NAV: Array<{ key: NavKey; label: string; href: string; adminOnly?: boolean }> = [
   { key: "workspace", label: "Workspace", href: "/" },
+  { key: "projects", label: "My Projects", href: "/projects" },
   { key: "playground", label: "Playground", href: "/playground" },
   { key: "admin", label: "Admin", href: "/admin", adminOnly: true },
   { key: "profile", label: "Profile", href: "/profile" },

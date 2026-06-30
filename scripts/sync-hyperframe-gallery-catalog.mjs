@@ -9,11 +9,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, relative, resolve } from "node:path";
+import { extname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const DEFAULT_LAUNCH_REPO_URL = "https://github.com/heygen-com/hyperframes-launch-video.git";
-const DEFAULT_LAUNCH_REPO_SOURCE_URL = "https://github.com/heygen-com/hyperframes-launch-video";
+const DEFAULT_LAUNCH_REPO_URL = "https://github.com/heygen-com/hyperframes-launches.git";
+const DEFAULT_LAUNCH_REPO_SOURCE_URL = "https://github.com/heygen-com/hyperframes-launches";
 const DEFAULT_LAUNCH_REF = "main";
 const DEFAULT_CATALOG_INDEX_URL = "https://hyperframes.heygen.com/llms.txt";
 const DEFAULT_CATALOG_SEED_URL = "https://hyperframes.heygen.com/catalog/blocks/code-3d-extrude.md";
@@ -49,7 +49,7 @@ const componentLimit = Number(
 );
 
 const tempRoot = mkdtempSync(join(tmpdir(), "hyperframe-gallery-"));
-const cloneDir = join(tempRoot, "launch-video");
+const cloneDir = join(tempRoot, "launches");
 
 try {
   cloneRepository(launchRepoUrl, cloneDir, launchRef);
@@ -76,7 +76,7 @@ try {
     generatedAt: new Date().toISOString(),
     sources: [
       {
-        id: "hyperframes-launch-video",
+        id: "hyperframes-launches",
         type: "launch-video-repo",
         url: sanitizeRepoUrl(launchSourceUrl),
         ref: launchRef,
@@ -118,74 +118,193 @@ try {
 }
 
 function buildLaunchExamples({ repoDir, sourceUrl, ref, revision }) {
-  const meta = readJson(join(repoDir, "meta.json"));
-  const readme = readOptional(join(repoDir, "README.md"));
-  const indexHtml = readFileSync(join(repoDir, "index.html"), "utf8");
-  const width = Number(meta.resolution?.width ?? 1920);
-  const height = Number(meta.resolution?.height ?? 1080);
-  const fps = Number(meta.fps ?? 30);
-  const rootDuration = Number(meta.duration ?? 49.77);
   const rawBase = `${sourceUrl.replace("github.com", "raw.githubusercontent.com")}/${revision}`;
-  const rootDescription =
-    extractReadmeDescription(readme) ||
-    "Official production HyperFrames launch video project with HTML, sub-compositions, media, captions, SFX, and render metadata.";
-  const rootPreview = `${rawBase}/docs/preview.gif`;
-  const root = {
-    id: "hyperframes-launch-video",
-    title: "HyperFrames Launch Video",
-    description: compact(rootDescription, 600),
-    sourceKind: "root-video",
-    durationSec: rootDuration,
-    width,
-    height,
-    fps,
-    tags: ["launch-video", "official", "html-video", "showcase"],
-    sourceUrl,
-    sourceRevision: revision,
-    previewMedia: {
-      type: "gif",
-      src: rootPreview,
-      alt: "Preview of the official HyperFrames launch video.",
-    },
-    promptText: compact(
-      `Use the official HyperFrames launch video as inspiration: a ${rootDuration}s ${width}x${height} production example showing CSS, GSAP, shaders, Three.js, footage, captions, sound effects, and a clear final CTA.`,
-      MAX_PROMPT_CHARS,
-    ),
-  };
+  const failures = [];
+  const examples = [];
+  const sourceText = [];
 
-  const sectionExamples = extractCompositionSlots(indexHtml)
-    .filter((slot) => slot.id !== "master")
-    .slice(0, 24)
-    .map((slot) => ({
-      id: `launch-section-${slot.id}`,
-      title: titleize(slot.id),
-      description: compact(
-        `Section from the official HyperFrames launch video using ${basename(slot.src || `${slot.id}.html`)}.`,
-        600,
-      ),
-      sourceKind: "section",
-      durationSec: slot.durationSec || rootDuration,
-      width,
-      height,
-      fps,
-      tags: ["launch-video", "section", ...tagsForLaunchSection(slot.id)],
-      sourceUrl: slot.src ? `${sourceUrl}/tree/${revision}/${slot.src}` : sourceUrl,
-      sourceRevision: revision,
-      previewMedia: {
-        type: "gif",
-        src: rootPreview,
-        alt: `${titleize(slot.id)} section from the official HyperFrames launch video.`,
-      },
-      promptText: compact(
-        `Use the "${titleize(slot.id)}" section from the official HyperFrames launch video as a motion reference. It is a ${formatSeconds(slot.durationSec)} beat from ${slot.src || "the root composition"}.`,
-        MAX_PROMPT_CHARS,
-      ),
-    }));
+  for (const entry of readdirSync(repoDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const folderDir = join(repoDir, entry.name);
+    const indexPath = join(folderDir, "index.html");
+    if (!existsSync(indexPath)) continue;
+    try {
+      const example = buildLaunchFolderExample({
+        folderName: entry.name,
+        folderDir,
+        sourceUrl,
+        rawBase,
+        revision,
+      });
+      examples.push(example.example);
+      sourceText.push(example.sourceText);
+    } catch (err) {
+      failures.push(`${entry.name} (${messageFromError(err)})`);
+    }
+  }
+
+  if (!examples.length) {
+    throw new Error(`No launch folders could be parsed. First failure: ${failures[0] ?? "none"}`);
+  }
+
+  if (failures.length) {
+    console.warn(`Skipped ${failures.length} launch folder(s): ${failures.slice(0, 4).join("; ")}`);
+  }
 
   return {
-    examples: [root, ...sectionExamples],
-    sourceText: [readme, indexHtml, JSON.stringify(meta)].join("\n"),
+    examples: examples.sort((a, b) => a.title.localeCompare(b.title)),
+    sourceText: sourceText.join("\n"),
   };
+}
+
+function buildLaunchFolderExample({ folderName, folderDir, sourceUrl, rawBase, revision }) {
+  const meta = readOptionalJson(join(folderDir, "meta.json")) ?? {};
+  const readme = readOptional(join(folderDir, "README.md"));
+  const storyboard = readOptional(join(folderDir, "STORYBOARD.md"));
+  const design = readOptional(join(folderDir, "DESIGN.md"));
+  const handoff = readOptional(join(folderDir, "HANDOFF.md"));
+  const indexHtml = readFileSync(join(folderDir, "index.html"), "utf8");
+  const dimensions = extractLaunchDimensions(indexHtml, meta);
+  const durationSec = Number(meta.duration) || extractLaunchDuration(indexHtml, readme, storyboard) || 30;
+  const fps = Number(meta.fps) || extractLaunchFps(readme, storyboard) || undefined;
+  const title = decodeBasicHtmlEntities(
+    extractTitle(readme) ||
+    extractHtmlTitle(indexHtml) ||
+    (typeof meta.name === "string" && titleize(meta.name)) ||
+    titleize(folderName),
+  );
+  const description =
+    (typeof meta.description === "string" && meta.description) ||
+    extractReadmeDescription(readme) ||
+    extractReadmeDescription(storyboard) ||
+    extractReadmeDescription(design) ||
+    `Standalone HyperFrames launch video project for ${title}.`;
+  const folderSourceUrl = `${sourceUrl}/tree/${revision}/${encodePath(folderName)}`;
+  const previewMedia = findLaunchPreviewMedia({
+    folderDir,
+    folderName,
+    rawBase,
+    sourceUrl,
+    revision,
+    title,
+  });
+
+  return {
+    example: {
+      id: slugify(folderName),
+      title: compact(title, 180),
+      description: compact(description, 600),
+      sourceKind: "launch-folder",
+      durationSec,
+      width: dimensions.width,
+      height: dimensions.height,
+      fps,
+      tags: unique(["launch-video", "official", "html-video", ...tagsForSlug(folderName)]).slice(0, 16),
+      sourceUrl: folderSourceUrl,
+      sourceRevision: revision,
+      previewMedia,
+      promptText: compact(
+        `Use "${title}" from the official HyperFrames launches repository as inspiration: a ${formatSeconds(durationSec)} ${dimensions.width}x${dimensions.height} launch-video composition with folder-specific source, assets, and motion language.`,
+        MAX_PROMPT_CHARS,
+      ),
+    },
+    sourceText: [folderName, JSON.stringify(meta), readme, storyboard, design, handoff, indexHtml].join("\n"),
+  };
+}
+
+function extractLaunchDimensions(indexHtml, meta) {
+  const width =
+    Number(meta.resolution?.width) ||
+    Number(meta.width) ||
+    Number(/data-width="([0-9]+)"/i.exec(indexHtml)?.[1]) ||
+    Number(/width=([0-9]+)/i.exec(indexHtml)?.[1]) ||
+    1920;
+  const height =
+    Number(meta.resolution?.height) ||
+    Number(meta.height) ||
+    Number(/data-height="([0-9]+)"/i.exec(indexHtml)?.[1]) ||
+    Number(/height=([0-9]+)/i.exec(indexHtml)?.[1]) ||
+    1080;
+  return { width, height };
+}
+
+function extractLaunchDuration(indexHtml, ...markdowns) {
+  const durations = [...indexHtml.matchAll(/data-duration="([0-9]+(?:\.[0-9]+)?)"/gi)]
+    .map((match) => Number(match[1]))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  if (durations.length) return Math.max(...durations);
+  for (const markdown of markdowns) {
+    const duration = parseDurationSec(markdown);
+    if (duration) return duration;
+    const minuteMatch = /([0-9]+(?:\.[0-9]+)?)\s*(?:minutes?|mins?|m)\b/i.exec(markdown);
+    if (minuteMatch) return Number(minuteMatch[1]) * 60;
+  }
+  return undefined;
+}
+
+function extractLaunchFps(...markdowns) {
+  for (const markdown of markdowns) {
+    const match = /([0-9]+(?:\.[0-9]+)?)\s*fps\b/i.exec(markdown);
+    if (match) return Number(match[1]);
+  }
+  return undefined;
+}
+
+function extractHtmlTitle(html) {
+  return /<title>\s*([^<]+?)\s*<\/title>/i.exec(html)?.[1]?.trim();
+}
+
+function findLaunchPreviewMedia({ folderDir, folderName, rawBase, sourceUrl, revision, title }) {
+  const files = listFilesRecursive(folderDir, 4)
+    .filter((file) => /\.(?:gif|png|jpe?g|webp|mp4|webm|mov)$/i.test(file))
+    .sort((a, b) => previewRank(a) - previewRank(b) || a.localeCompare(b));
+  const selected = files[0];
+  if (!selected) {
+    return {
+      type: "image",
+      src: githubOpenGraphImageUrl(sourceUrl, revision, folderName),
+      alt: `${title} launch folder preview.`,
+    };
+  }
+  const ext = extname(selected).toLowerCase();
+  return {
+    type: ext === ".gif" ? "gif" : [".mp4", ".webm", ".mov"].includes(ext) ? "video" : "image",
+    src: `${rawBase}/${encodePath(folderName)}/${encodePath(selected)}`,
+    alt: `${title} preview media.`,
+  };
+}
+
+function listFilesRecursive(dir, maxDepth, prefix = "") {
+  if (maxDepth < 0) return [];
+  const files = [];
+  for (const entry of readdirSync(join(dir, prefix), { withFileTypes: true })) {
+    if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      files.push(...listFilesRecursive(dir, maxDepth - 1, rel));
+    } else if (entry.isFile()) {
+      files.push(rel);
+    }
+  }
+  return files;
+}
+
+function previewRank(path) {
+  const lower = path.toLowerCase();
+  if (/docs\/preview\.(?:gif|png|jpe?g|webp|mp4)$/.test(lower)) return 0;
+  if (/^preview\.(?:gif|png|jpe?g|webp|mp4)$/.test(lower)) return 1;
+  if (/og-image\.(?:png|jpe?g|webp)$/.test(lower)) return 2;
+  if (/contact-sheet.*\.(?:png|jpe?g|webp)$/.test(lower)) return 3;
+  if (/snapshots?\/frame-?0.*\.(?:png|jpe?g|webp)$/.test(lower)) return 4;
+  if (/renders?\/.*\.(?:mp4|webm|mov)$/.test(lower)) return 5;
+  if (/\.(?:webp|png|jpe?g|gif)$/.test(lower)) return 6;
+  return 7;
+}
+
+function githubOpenGraphImageUrl(sourceUrl, revision, folderName) {
+  const url = new URL(sourceUrl);
+  const repoPath = url.pathname.replace(/^\/|\/$/g, "");
+  return `https://opengraph.githubassets.com/${revision.slice(0, 12)}-${slugify(folderName)}/${repoPath}/tree/${revision}/${encodePath(folderName)}`;
 }
 
 async function buildCatalogEntries({ indexUrl, seedUrl, indexMarkdown, limit }) {
@@ -501,6 +620,7 @@ function cloneRepository(rawRepoUrl, destination, ref) {
     "clone",
     "--depth",
     "1",
+    "--filter=blob:none",
     "--branch",
     ref,
     rawRepoUrl,
@@ -510,7 +630,7 @@ function cloneRepository(rawRepoUrl, destination, ref) {
   if (branchClone.status === 0) return;
 
   rmSync(destination, { recursive: true, force: true });
-  git(["clone", "--depth", "1", rawRepoUrl, destination], { silent: true });
+  git(["clone", "--depth", "1", "--filter=blob:none", rawRepoUrl, destination], { silent: true });
   git(["-C", destination, "checkout", "--detach", ref], { silent: true });
 }
 
@@ -529,6 +649,10 @@ function git(args, { silent = false, allowFailure = false } = {}) {
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
+}
+
+function readOptionalJson(path) {
+  return existsSync(path) ? readJson(path) : null;
 }
 
 function readOptional(path) {
@@ -626,6 +750,19 @@ function slugify(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+function encodePath(value) {
+  return String(value).split("/").map(encodeURIComponent).join("/");
+}
+
+function decodeBasicHtmlEntities(value) {
+  return String(value)
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
 }
 
 function formatSeconds(value) {

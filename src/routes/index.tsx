@@ -55,6 +55,11 @@ import {
   type RenderFormat,
 } from "@/lib/main-page-creation-flow";
 import {
+  MAIN_PAGE_GRID_CLASS,
+  SELECTED_CONTEXT_BOX_CLASS,
+  SELECTED_CONTEXT_CHIP_CLASS,
+} from "@/lib/main-page-layout";
+import {
   appendGalleryPromptText,
   countSelectedGalleryItems,
   GALLERY_COMPONENT_SELECTION_LIMIT,
@@ -391,7 +396,7 @@ function MotionFramesHome() {
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground">
       <AppHeader active="workspace" />
-      <section className="grid w-full flex-1 grid-cols-1 items-start gap-6 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(360px,0.95fr)_minmax(420px,1fr)] lg:px-8 xl:grid-cols-[minmax(420px,0.9fr)_minmax(460px,1fr)]">
+      <main className={MAIN_PAGE_GRID_CLASS}>
         <HyperframeGalleryWorkspace
           surface={workspaceSurface}
           onSurfaceChange={setWorkspaceSurface}
@@ -678,7 +683,7 @@ function MotionFramesHome() {
             </div>
           ) : null}
         </aside>
-      </section>
+      </main>
     </div>
   );
 }
@@ -712,25 +717,25 @@ function SelectedGalleryContextChips({
   return (
     <div
       aria-label="Selected gallery prompt context"
-      className="rounded-md border border-hairline bg-surface-card px-3 py-2"
+      className={SELECTED_CONTEXT_BOX_CLASS}
     >
-      <div className="mb-2 text-xs font-medium uppercase tracking-normal text-muted-foreground">
+      <div className="mb-2 text-xs font-medium uppercase tracking-normal text-emerald-800">
         Selected context
       </div>
       <div className="flex flex-wrap gap-2">
         {items.map((item) => (
           <span
             key={`${item.kind}-${item.id}`}
-            className="inline-flex max-w-full items-center gap-2 rounded-full border border-hairline bg-background px-3 py-1.5 text-sm text-foreground"
+            className={SELECTED_CONTEXT_CHIP_CLASS}
           >
-            <span className="shrink-0 text-xs text-muted-foreground">{item.label}</span>
+            <span className="shrink-0 text-xs text-emerald-700">{item.label}</span>
             <span className="min-w-0 truncate">{item.name}</span>
             <button
               type="button"
               disabled={disabled}
               onClick={item.onRemove}
               aria-label={`Remove ${item.name} from selected gallery context`}
-              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-card hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-emerald-700 transition-colors hover:bg-emerald-100 hover:text-emerald-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <X className="h-3.5 w-3.5" aria-hidden="true" />
             </button>

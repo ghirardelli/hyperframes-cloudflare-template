@@ -461,6 +461,7 @@ interface GenerateRequestBody {
   durationSec?: number;
   projectId?: string;
   title?: string;
+  description?: string;
 }
 
 async function handleGenerate(
@@ -1181,12 +1182,14 @@ async function handleCreateProject(
 ): Promise<Response> {
   const body = await readJson<{
     title?: string;
+    description?: string | null;
     prompt?: string;
     html?: string;
     durationSec?: number;
   }>(req);
   const project = await createProject(env, context, {
     title: body.title || titleFromPrompt(body.prompt || "Untitled project"),
+    description: normalizeProjectDescription(body.description),
     prompt: body.prompt,
     html: body.html,
     durationSec: normalizedDuration(body.durationSec) ?? 6,
@@ -1218,7 +1221,7 @@ async function handleProjectSearch(
     .where(
       and(
         eq(projects.organizationId, context.organization.id),
-        or(ilike(projects.title, like), ilike(projects.prompt, like)),
+        or(ilike(projects.title, like), ilike(projects.description, like), ilike(projects.prompt, like)),
       ),
     )
     .orderBy(desc(projects.updatedAt));
@@ -1541,6 +1544,7 @@ async function handleUpdateProject(
   const project = await requireProjectAccess(context, projectId, env, "edit");
   const body = await readJson<{
     title?: string;
+    description?: string | null;
     prompt?: string;
     html?: string;
     durationSec?: number;
@@ -1549,6 +1553,7 @@ async function handleUpdateProject(
     updatedAt: new Date(),
   };
   if (typeof body.title === "string") update.title = body.title.trim() || "Untitled project";
+  if ("description" in body) update.description = normalizeProjectDescription(body.description);
   if (typeof body.prompt === "string") update.prompt = body.prompt;
   if (typeof body.html === "string") update.currentHtml = body.html;
   if (typeof body.durationSec === "number") update.durationSec = normalizedDuration(body.durationSec) ?? 6;
@@ -1691,6 +1696,7 @@ async function upsertGeneratedProject(
   }
   return createProject(env, context, {
     title: body.title || titleFromPrompt(body.prompt || "Generated project"),
+    description: normalizeProjectDescription(body.description),
     prompt: body.prompt,
     html,
     durationSec,
@@ -1702,6 +1708,7 @@ async function createProject(
   context: AppAuthContext,
   input: {
     title: string;
+    description?: string | null;
     prompt?: string;
     html?: string;
     durationSec: number;
@@ -1716,6 +1723,7 @@ async function createProject(
       organizationId: context.organization.id,
       ownerId: context.user.id,
       title: input.title.trim() || "Untitled project",
+      description: normalizeProjectDescription(input.description),
       prompt: input.prompt || null,
       currentHtml: input.html || null,
       durationSec: input.durationSec,
@@ -1843,6 +1851,12 @@ function normalizedDuration(durationSec: unknown): number | undefined {
 function titleFromPrompt(prompt: string): string {
   const words = prompt.trim().split(/\s+/).slice(0, 7).join(" ");
   return words || "Untitled project";
+}
+
+function normalizeProjectDescription(description: unknown): string | null {
+  if (typeof description !== "string") return null;
+  const trimmed = description.trim();
+  return trimmed || null;
 }
 
 function slugify(value: string): string {

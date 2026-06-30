@@ -26,19 +26,19 @@ describe("hyperframe gallery catalog", () => {
 
     expect(catalog.sources.map((source) => source.id)).toEqual(
       expect.arrayContaining([
-        "hyperframes-launch-video",
+        "hyperframes-launches",
         "hyperframes-catalog-index",
         "catalog-page-code-3d-extrude",
       ]),
     );
     expect(catalog.examples[0]).toMatchObject({
-      id: "hyperframes-launch-video",
-      title: "HyperFrames Launch Video",
-      sourceKind: "root-video",
+      sourceKind: "launch-folder",
       width: 1920,
       height: 1080,
-      previewMedia: expect.objectContaining({ type: "gif" }),
+      sourceUrl: expect.stringContaining("https://github.com/heygen-com/hyperframes-launches"),
+      previewMedia: expect.objectContaining({ src: expect.any(String) }),
     });
+    expect(new Set(catalog.examples.map((example) => example.previewMedia.src)).size).toBeGreaterThan(1);
     expect(catalog.components.map((component) => component.id)).toEqual(
       expect.arrayContaining(["code-3d-extrude", "caption-neon-glow"]),
     );
@@ -60,13 +60,15 @@ describe("hyperframe gallery catalog", () => {
     expect(codeExtrude).toBeTruthy();
     expect(codeExtrude?.usageSnippet).toContain("data-composition-id");
 
+    const launchExample =
+      examples.find((example) => example.id === "hyperframes-launch") ?? examples[0];
     const context = {
-      examples: [createSelectedExampleItem(examples[0])],
+      examples: [createSelectedExampleItem(launchExample)],
       components: [createSelectedComponentItem(codeExtrude!)],
     };
     const promptText = buildGalleryPromptText(context);
 
-    expect(promptText).toContain("HyperFrames Launch Video");
+    expect(promptText).toContain(launchExample.title);
     expect(promptText).toContain("Code 3D Extrude");
     expect(countSelectedGalleryItems(context)).toBe(2);
     expect(summarizeSelectedGalleryContext(context)).toBe("1 example + 1 component");

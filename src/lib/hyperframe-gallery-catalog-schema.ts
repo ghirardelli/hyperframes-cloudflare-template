@@ -30,7 +30,7 @@ export const galleryExampleSchema = z.object({
   id: z.string().min(1).max(160),
   title: z.string().min(1).max(180),
   description: z.string().min(1).max(600),
-  sourceKind: z.enum(["root-video", "section"]),
+  sourceKind: z.enum(["root-video", "section", "launch-folder"]),
   durationSec: z.number().positive().max(3_600),
   width: z.number().int().positive().max(8_000),
   height: z.number().int().positive().max(8_000),

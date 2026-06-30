@@ -141,6 +141,10 @@ textarea {
   letter-spacing: 0;
 }
 
+.component-filter-button {
+  font-size: 12px;
+}
+
 hyperframes-player {
   display: block;
 }

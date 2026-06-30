@@ -27,6 +27,10 @@ import {
   type GalleryExample,
   type SelectedGalleryPromptContext,
 } from "@/lib/hyperframe-gallery-catalog";
+import {
+  COMPONENT_FILTER_BUTTON_CLASS,
+  COMPONENT_FILTER_ROW_CLASS,
+} from "@/lib/main-page-layout";
 import { cn } from "@/lib/utils";
 
 export type GalleryTab = "examples" | "components";
@@ -209,7 +213,7 @@ export function HyperframeGalleryWorkspace({
         ) : null}
 
         {activeGalleryTab === "components" ? (
-          <div className="flex gap-2 overflow-x-auto pb-1">
+          <div className={COMPONENT_FILTER_ROW_CLASS}>
             <button
               type="button"
               onClick={() => onComponentCategoryChange("All")}
@@ -583,7 +587,7 @@ function tabClassName(active: boolean): string {
 
 function filterClassName(active: boolean): string {
   return cn(
-    "inline-flex h-9 shrink-0 items-center gap-1 rounded-full border px-3 text-sm font-medium transition-colors",
+    COMPONENT_FILTER_BUTTON_CLASS,
     active
       ? "border-foreground bg-foreground text-primary-foreground"
       : "border-hairline bg-background text-muted-foreground hover:text-foreground",
