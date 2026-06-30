@@ -110,7 +110,7 @@ export async function handleWorkerApi(
         websiteToVideoWorkflowEnabled: isWebsiteToVideoWorkflowEnabled(env),
         modelLabel: env.OPENROUTER_MODEL?.trim() || DEFAULT_MODEL,
       },
-      { headers: { "cache-control": "public, max-age=300" } },
+      { headers: { "cache-control": "no-store" } },
     );
   }
 

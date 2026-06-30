@@ -17,7 +17,7 @@
     // Optional first-admin bootstrap. Remove after assigning real admin users:
     // "INITIAL_ADMIN_EMAILS": "admin@example.com"
     // Optional model override:
-    // "OPENROUTER_MODEL": "google/gemini-3-flash-preview"
+    "OPENROUTER_MODEL": "deepseek/deepseek-v4-flash",
     "BUNNY_STORAGE_ZONE_NAME": "motionframes-projects-staging",
     "BUNNY_STORAGE_ENDPOINT": "https://la.storage.bunnycdn.com",
     "BUNNY_STREAM_LIBRARY_ID": "693756",

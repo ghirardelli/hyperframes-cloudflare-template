@@ -251,7 +251,7 @@ describe("handleWorkerApi", () => {
     );
 
     expect(response).toBeInstanceOf(Response);
-    expect(response?.headers.get("cache-control")).toBe("public, max-age=300");
+    expect(response?.headers.get("cache-control")).toBe("no-store");
     await expect(response?.json()).resolves.toEqual({
       aiGenEnabled: true,
       websiteToVideoWorkflowEnabled: false,
