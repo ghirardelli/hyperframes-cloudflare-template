@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useToast } from "@/components/ui/toast";
 
 export const Route = createFileRoute("/profile")({
   component: ProfilePage,
@@ -24,11 +25,11 @@ interface Profile {
 
 function ProfilePage() {
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [status, setStatus] = useState("");
+  const toast = useToast();
 
   useEffect(() => {
-    fetchJson<Profile>("/api/profile").then(setProfile).catch((err) => setStatus(messageFromError(err)));
-  }, []);
+    fetchJson<Profile>("/api/profile").then(setProfile).catch((err) => toast.error(messageFromError(err)));
+  }, [toast]);
 
   async function updateProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -40,9 +41,9 @@ function ProfilePage() {
         body: JSON.stringify({ name: String(form.get("name")) }),
       });
       setProfile(data);
-      setStatus("Profile updated.");
+      toast.success("Profile updated.");
     } catch (err) {
-      setStatus(messageFromError(err));
+      toast.error(messageFromError(err));
     }
   }
 
@@ -60,9 +61,9 @@ function ProfilePage() {
         }),
       });
       formElement.reset();
-      setStatus("Password changed.");
+      toast.success("Password changed.");
     } catch (err) {
-      setStatus(messageFromError(err));
+      toast.error(messageFromError(err));
     }
   }
 
@@ -115,7 +116,6 @@ function ProfilePage() {
             </CardContent>
           </Card>
         </div>
-          {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
         </div>
       </main>
     </div>

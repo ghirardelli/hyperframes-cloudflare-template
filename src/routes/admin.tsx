@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useToast } from "@/components/ui/toast";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
@@ -32,6 +33,7 @@ function AdminPage() {
   const [users, setUsers] = useState<Array<AdminUser>>([]);
   const [status, setStatus] = useState("");
   const [canAdmin, setCanAdmin] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     void refresh().catch((err) => {
@@ -78,20 +80,25 @@ function AdminPage() {
         }),
       });
       formElement.reset();
-      setStatus("User created.");
+      toast.success("User created.");
       await refresh();
     } catch (err) {
-      setStatus(messageFromError(err));
+      toast.error(messageFromError(err));
     }
   }
 
   async function setLocked(user: AdminUser, locked: boolean) {
-    await fetchJson(`/api/admin/users/${user.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ locked }),
-    });
-    await refresh();
+    try {
+      await fetchJson(`/api/admin/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ locked }),
+      });
+      await refresh();
+      toast.success(`${user.name} ${locked ? "locked" : "unlocked"}.`);
+    } catch (err) {
+      toast.error(messageFromError(err));
+    }
   }
 
   if (!canAdmin) {
@@ -159,7 +166,6 @@ function AdminPage() {
                   <UserPlus className="h-4 w-4" aria-hidden="true" />
                   Create user
                 </Button>
-                {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
               </form>
             </CardContent>
           </Card>

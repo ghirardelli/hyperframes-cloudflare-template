@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/ui/toast";
 import {
   buildProjectLibraryItems,
   type ProjectLibraryProject,
@@ -52,13 +53,13 @@ function ProjectsPage() {
   >({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [status, setStatus] = useState("");
   const [editingId, setEditingId] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [savingId, setSavingId] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deletingId, setDeletingId] = useState("");
+  const toast = useToast();
 
   useEffect(() => {
     let cancelled = false;
@@ -103,7 +104,6 @@ function ProjectsPage() {
     setEditingId(project.id);
     setDraftTitle(project.title?.trim() || "Untitled project");
     setDraftDescription(project.description?.trim() || "");
-    setStatus("");
   }
 
   async function saveMetadata(event: FormEvent<HTMLFormElement>, projectId: string) {
@@ -125,9 +125,9 @@ function ProjectsPage() {
         current.map((project) => (project.id === projectId ? data.project : project)),
       );
       setEditingId("");
-      setStatus("Project updated.");
+      toast.success("Project updated.");
     } catch (err) {
-      setStatus(messageFromError(err));
+      toast.error(messageFromError(err));
     } finally {
       setSavingId("");
     }
@@ -135,7 +135,6 @@ function ProjectsPage() {
 
   function beginDelete(project: Project) {
     setDeleteTarget(project);
-    setStatus("");
   }
 
   async function confirmDelete() {
@@ -153,9 +152,9 @@ function ProjectsPage() {
       });
       setEditingId((current) => (current === deleteTarget.id ? "" : current));
       setDeleteTarget(null);
-      setStatus("Project deleted.");
+      toast.success("Project deleted.");
     } catch (err) {
-      setStatus(messageFromError(err));
+      toast.error(messageFromError(err));
     } finally {
       setDeletingId("");
     }
@@ -375,12 +374,6 @@ function ProjectsPage() {
               </div>
             </section>
           )}
-
-          {status ? (
-            <div className="rounded-lg border border-hairline bg-surface-card px-3 py-2 text-sm text-muted-foreground">
-              {status}
-            </div>
-          ) : null}
         </div>
       </main>
 
@@ -407,11 +400,6 @@ function ProjectsPage() {
                 </p>
               </div>
             </div>
-            {status ? (
-              <p className="mt-4 break-words rounded-md border border-hairline bg-surface-card px-3 py-2 text-sm text-muted-foreground">
-                {status}
-              </p>
-            ) : null}
             <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button
                 type="button"

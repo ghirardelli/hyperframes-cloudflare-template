@@ -4,6 +4,7 @@ import { Copy, Play } from "lucide-react";
 
 import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 
 export const Route = createFileRoute("/playground")({
   component: PlaygroundPage,
@@ -23,7 +24,7 @@ function PlaygroundPage() {
   const [catalogCount, setCatalogCount] = useState(0);
   const [examples, setExamples] = useState<Array<CatalogItem>>([]);
   const [publishedProjects, setPublishedProjects] = useState<Array<CatalogItem>>([]);
-  const [status, setStatus] = useState("");
+  const toast = useToast();
 
   useEffect(() => {
     fetchJson<{
@@ -36,8 +37,8 @@ function PlaygroundPage() {
         setExamples(data.examples);
         setPublishedProjects(data.publishedProjects);
       })
-      .catch((err) => setStatus(messageFromError(err)));
-  }, []);
+      .catch((err) => toast.error(messageFromError(err)));
+  }, [toast]);
 
   async function remix(id: string) {
     try {
@@ -46,7 +47,7 @@ function PlaygroundPage() {
       });
       window.location.assign(`/projects/${data.project.id}/studio`);
     } catch (err) {
-      setStatus(messageFromError(err));
+      toast.error(messageFromError(err));
     }
   }
 
@@ -94,7 +95,6 @@ function PlaygroundPage() {
             </article>
           ))}
         </section>
-        {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
       </main>
     </div>
   );
