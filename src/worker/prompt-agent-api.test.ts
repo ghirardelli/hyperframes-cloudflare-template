@@ -91,6 +91,26 @@ function mockAgentParams() {
       currentPrompt: "A launch reel",
       durationSec: 8,
       activeProjectTitle: "Launch Reel",
+      selectedGalleryContext: {
+        examples: [
+          {
+            id: "hyperframes-launch-video",
+            kind: "example",
+            name: "HyperFrames Launch Video",
+            sourceUrl: "https://github.com/heygen-com/hyperframes-launch-video",
+            promptText: "Use the official HyperFrames launch video as pacing inspiration.",
+          },
+        ],
+        components: [
+          {
+            id: "code-3d-extrude",
+            kind: "component",
+            name: "Code 3D Extrude",
+            sourceUrl: "https://hyperframes.heygen.com/catalog/blocks/code-3d-extrude",
+            promptText: "Use Code 3D Extrude for dimensional source-code typography.",
+          },
+        ],
+      },
     },
     state: null,
     context: [],
@@ -195,6 +215,14 @@ describe("prompt agent worker route", () => {
           forwardedPrompt: "A launch reel",
           forwardedDurationSec: 8,
           forwardedActiveProjectTitle: "Launch Reel",
+          forwardedGalleryContext: expect.objectContaining({
+            examples: expect.arrayContaining([
+              expect.objectContaining({ name: "HyperFrames Launch Video" }),
+            ]),
+            components: expect.arrayContaining([
+              expect.objectContaining({ name: "Code 3D Extrude" }),
+            ]),
+          }),
         }),
       }),
     );
@@ -202,6 +230,9 @@ describe("prompt agent worker route", () => {
     expect(chatConfig.systemPrompts[0]).toContain("route_hyperframes_workflow");
     expect(chatConfig.systemPrompts[0]).toContain("fullPipelineAvailable=false");
     expect(chatConfig.systemPrompts[0]).toContain("do not claim website capture");
+    expect(chatConfig.systemPrompts[0]).toContain("Selected gallery context:");
+    expect(chatConfig.systemPrompts[0]).toContain("Component: Code 3D Extrude");
+    expect(chatConfig.systemPrompts[0]).toContain("preserving exact component names");
     expect(chatConfig.tools.map((tool: { name: string }) => tool.name)).toEqual(
       expect.arrayContaining([
         "list_hyperframes_skill_catalog",

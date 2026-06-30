@@ -21,6 +21,7 @@ import {
   routeHyperframesWorkflow,
 } from "./hyperframes-skill-catalog";
 import type { WorkerEnv } from "../worker/render-api";
+import type { SelectedGalleryPromptContext } from "./hyperframe-gallery-catalog";
 import {
   cancelWebsiteToVideoWorkflowRun,
   continueWebsiteToVideoWorkflowRun,
@@ -35,6 +36,7 @@ export interface PromptAgentToolContext {
   forwardedPrompt?: string;
   forwardedDurationSec?: number;
   forwardedActiveProjectTitle?: string;
+  forwardedGalleryContext?: SelectedGalleryPromptContext;
   generateHyperframe: (input: {
     prompt: string;
     durationSec?: number;

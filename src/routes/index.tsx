@@ -6,16 +6,21 @@ import {
   Clock3,
   Download,
   Film,
-  FolderKanban,
   Info,
   Loader2,
-  MonitorPlay,
   Play,
   RotateCcw,
   Sparkles,
+  X,
 } from "lucide-react";
 
 import { AppHeader } from "@/components/app-header";
+import {
+  buildPromptContextFromIds,
+  HyperframeGalleryWorkspace,
+  type GalleryTab,
+  type WorkspaceSurface,
+} from "@/components/hyperframe-gallery-workspace";
 import { PromptAgentPanel } from "@/components/prompt-agent-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,6 +54,17 @@ import {
   type ExportResolutionId,
   type RenderFormat,
 } from "@/lib/main-page-creation-flow";
+import {
+  appendGalleryPromptText,
+  countSelectedGalleryItems,
+  GALLERY_COMPONENT_SELECTION_LIMIT,
+  GALLERY_EXAMPLE_SELECTION_LIMIT,
+  removeGallerySelectionId,
+  toggleGallerySelectionId,
+  type GalleryComponent,
+  type GalleryExample,
+  type SelectedGalleryPromptContext,
+} from "@/lib/hyperframe-gallery-catalog";
 import type { GenerateHyperframeOutput } from "@/lib/prompt-agent-contract";
 
 export const Route = createFileRoute("/")({
@@ -110,6 +126,11 @@ function MotionFramesHome() {
     DEFAULT_RENDER_RESOLUTION_ID,
   );
   const [renderFormat, setRenderFormat] = useState<RenderFormat>(DEFAULT_RENDER_FORMAT);
+  const [workspaceSurface, setWorkspaceSurface] = useState<WorkspaceSurface>("gallery");
+  const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>("examples");
+  const [activeComponentCategory, setActiveComponentCategory] = useState("All");
+  const [selectedExampleIds, setSelectedExampleIds] = useState<Array<string>>([]);
+  const [selectedComponentIds, setSelectedComponentIds] = useState<Array<string>>([]);
   const [generatedHtml, setGeneratedHtml] = useState("");
   const [aiEnabled, setAiEnabled] = useState(false);
   const [modelLabel, setModelLabel] = useState("");
@@ -126,6 +147,7 @@ function MotionFramesHome() {
   });
 
   const activeSource = generatedHtml ? "Generated HTML" : "Bundled intro";
+  const hasGeneratedOutput = Boolean(generatedHtml || activeProjectId);
   const canGenerate = aiEnabled && prompt.trim().length > 0;
   const canRender = !isRendering && !isGenerating;
   const canUseAgentTab = isConfigReady && aiEnabled;
@@ -135,10 +157,22 @@ function MotionFramesHome() {
       : resolveCreationTab(activeCreationTab, canUseAgentTab);
   const exportResolution = getExportResolutionPreset(exportResolutionId);
   const renderFormatName = renderFormatLabel(renderFormat);
+  const renderSourceDescription = hasGeneratedOutput
+    ? "current generated HyperFrame"
+    : "bundled default composition";
   const durationOptions = useMemo(
     () => Array.from(new Set([...DURATION_PRESETS, durationSec])).sort((a, b) => a - b),
     [durationSec],
   );
+  const selectedGalleryContext = useMemo(
+    () =>
+      buildPromptContextFromIds({
+        exampleIds: selectedExampleIds,
+        componentIds: selectedComponentIds,
+      }),
+    [selectedComponentIds, selectedExampleIds],
+  );
+  const selectedGalleryCount = countSelectedGalleryItems(selectedGalleryContext);
 
   useEffect(() => {
     fetch("/api/me")
@@ -198,7 +232,7 @@ function MotionFramesHome() {
 
     player.removeAttribute("srcdoc");
     player.setAttribute("src", "/api/preview");
-  }, [generatedHtml]);
+  }, [generatedHtml, workspaceSurface]);
 
   const statusClassName = useMemo(() => {
     if (status.tone === "success") return "border-emerald-400/70 bg-emerald-50 text-emerald-900";
@@ -240,6 +274,7 @@ function MotionFramesHome() {
       }
 
       setGeneratedHtml(data.html);
+      setWorkspaceSurface("preview");
       if (data.project?.id) {
         setActiveProjectId(data.project.id);
         setActiveProjectTitle(data.project.title);
@@ -258,6 +293,7 @@ function MotionFramesHome() {
   function applyAgentGeneration(data: GenerateHyperframeOutput) {
     setGeneratedHtml(data.html);
     setRenderUrl("");
+    setWorkspaceSurface("preview");
     if (data.project?.id) {
       setActiveProjectId(data.project.id);
       setActiveProjectTitle(data.project.title);
@@ -308,7 +344,37 @@ function MotionFramesHome() {
     setRenderUrl("");
     setActiveProjectId("");
     setActiveProjectTitle("");
+    setWorkspaceSurface("gallery");
     setStatus({ tone: "idle", message: "" });
+  }
+
+  function toggleExampleSelection(example: GalleryExample) {
+    setSelectedExampleIds((current) =>
+      toggleGallerySelectionId(current, example.id, GALLERY_EXAMPLE_SELECTION_LIMIT),
+    );
+  }
+
+  function toggleComponentSelection(component: GalleryComponent) {
+    setSelectedComponentIds((current) =>
+      toggleGallerySelectionId(current, component.id, GALLERY_COMPONENT_SELECTION_LIMIT),
+    );
+  }
+
+  function removeSelectedExample(exampleId: string) {
+    setSelectedExampleIds((current) => removeGallerySelectionId(current, exampleId));
+  }
+
+  function removeSelectedComponent(componentId: string) {
+    setSelectedComponentIds((current) => removeGallerySelectionId(current, componentId));
+  }
+
+  function insertSelectedGalleryContext() {
+    if (!selectedGalleryCount) return;
+    setPrompt((current) => appendGalleryPromptText(current, selectedGalleryContext));
+    setStatus({
+      tone: "success",
+      message: "Added selected gallery context to the prompt.",
+    });
   }
 
   if (!me) {
@@ -326,56 +392,25 @@ function MotionFramesHome() {
     <div className="flex min-h-dvh flex-col bg-background text-foreground">
       <AppHeader active="workspace" />
       <section className="grid w-full flex-1 grid-cols-1 items-start gap-6 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(360px,0.95fr)_minmax(420px,1fr)] lg:px-8 xl:grid-cols-[minmax(420px,0.9fr)_minmax(460px,1fr)]">
-        <div className="space-y-4 lg:sticky lg:top-24">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h1 className="text-2xl font-semibold text-foreground">
-                {activeProjectTitle || "Workspace"}
-              </h1>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <Badge variant="secondary" className="h-8 rounded-full px-3">
-                  {activeProjectTitle || activeSource}
-                </Badge>
-                <Badge variant="outline" className="h-8 rounded-full px-3">
-                  {formatDurationOption(durationSec)} timeline
-                </Badge>
-              </div>
-            </div>
-            {activeProjectId ? (
-              <Button asChild variant="secondary" size="sm">
-                <a href={`/projects/${activeProjectId}/studio`}>
-                  <FolderKanban className="h-4 w-4" aria-hidden="true" />
-                  Open in Studio
-                </a>
-              </Button>
-            ) : null}
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                <MonitorPlay className="h-4 w-4" aria-hidden="true" />
-                Preview
-              </div>
-              <Badge variant="outline" className="rounded-full px-3">
-                1920 x 1080 canvas
-              </Badge>
-            </div>
-            <div className="relative overflow-hidden rounded-md border border-hairline bg-background shadow-sm">
-              <hyperframes-player
-                ref={playerRef}
-                class="aspect-video w-full overflow-hidden rounded-md bg-black"
-                src="/api/preview"
-                width="1920"
-                height="1080"
-                controls
-              />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Preview stays fixed to the composition aspect ratio while you refine prompts or render exports.
-            </p>
-          </div>
-        </div>
+        <HyperframeGalleryWorkspace
+          surface={workspaceSurface}
+          onSurfaceChange={setWorkspaceSurface}
+          activeGalleryTab={activeGalleryTab}
+          onGalleryTabChange={setActiveGalleryTab}
+          activeComponentCategory={activeComponentCategory}
+          onComponentCategoryChange={setActiveComponentCategory}
+          selectedExampleIds={selectedExampleIds}
+          selectedComponentIds={selectedComponentIds}
+          onToggleExample={toggleExampleSelection}
+          onToggleComponent={toggleComponentSelection}
+          promptContext={selectedGalleryContext}
+          hasGeneratedOutput={hasGeneratedOutput}
+          activeProjectId={activeProjectId}
+          activeProjectTitle={activeProjectTitle}
+          activeSource={activeSource}
+          durationLabel={formatDurationOption(durationSec)}
+          playerRef={playerRef}
+        />
 
         <aside className="flex min-w-0 flex-col gap-4">
           <Card className="overflow-visible">
@@ -458,6 +493,13 @@ function MotionFramesHome() {
                 </button>
               </div>
 
+              <SelectedGalleryContextChips
+                context={selectedGalleryContext}
+                disabled={isGenerating || isRendering}
+                onRemoveExample={removeSelectedExample}
+                onRemoveComponent={removeSelectedComponent}
+              />
+
               {visibleCreationTab !== "render" ? (
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                   <div className="space-y-2">
@@ -496,6 +538,7 @@ function MotionFramesHome() {
                   modelLabel={modelLabel}
                   activeProjectId={activeProjectId}
                   activeProjectTitle={activeProjectTitle}
+                  selectedGalleryContext={selectedGalleryContext}
                   isGenerating={isGenerating}
                   isRendering={isRendering}
                   onGenerated={applyAgentGeneration}
@@ -504,6 +547,20 @@ function MotionFramesHome() {
 
               {visibleCreationTab === "manual" ? (
                 <div className="space-y-4">
+                  {selectedGalleryCount ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-hairline bg-surface-card px-3 py-2 text-sm text-muted-foreground">
+                      <span>{selectedGalleryCount} gallery item{selectedGalleryCount === 1 ? "" : "s"} selected</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={insertSelectedGalleryContext}
+                        disabled={isGenerating || isRendering}
+                      >
+                        Add to prompt
+                      </Button>
+                    </div>
+                  ) : null}
                   <div className="space-y-2">
                     <Label htmlFor="prompt">Final generation prompt</Label>
                     <Textarea
@@ -568,7 +625,7 @@ function MotionFramesHome() {
                     </div>
                   </div>
                   <div className="rounded-md bg-surface-card px-3 py-2 text-sm text-muted-foreground">
-                    Render exports the current preview at {exportResolution.width} x {exportResolution.height} as {renderFormatName}. The generated timeline remains {formatDurationOption(durationSec)}.
+                    Render exports the {renderSourceDescription} at {exportResolution.width} x {exportResolution.height} as {renderFormatName}. The timeline remains {formatDurationOption(durationSec)}.
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
                     <Button
@@ -622,6 +679,64 @@ function MotionFramesHome() {
           ) : null}
         </aside>
       </section>
+    </div>
+  );
+}
+
+function SelectedGalleryContextChips({
+  context,
+  disabled,
+  onRemoveExample,
+  onRemoveComponent,
+}: {
+  context: SelectedGalleryPromptContext;
+  disabled: boolean;
+  onRemoveExample: (exampleId: string) => void;
+  onRemoveComponent: (componentId: string) => void;
+}) {
+  const items = [
+    ...context.examples.map((item) => ({
+      ...item,
+      label: "Example",
+      onRemove: () => onRemoveExample(item.id),
+    })),
+    ...context.components.map((item) => ({
+      ...item,
+      label: "Component",
+      onRemove: () => onRemoveComponent(item.id),
+    })),
+  ];
+
+  if (!items.length) return null;
+
+  return (
+    <div
+      aria-label="Selected gallery prompt context"
+      className="rounded-md border border-hairline bg-surface-card px-3 py-2"
+    >
+      <div className="mb-2 text-xs font-medium uppercase tracking-normal text-muted-foreground">
+        Selected context
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {items.map((item) => (
+          <span
+            key={`${item.kind}-${item.id}`}
+            className="inline-flex max-w-full items-center gap-2 rounded-full border border-hairline bg-background px-3 py-1.5 text-sm text-foreground"
+          >
+            <span className="shrink-0 text-xs text-muted-foreground">{item.label}</span>
+            <span className="min-w-0 truncate">{item.name}</span>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={item.onRemove}
+              aria-label={`Remove ${item.name} from selected gallery context`}
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-card hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

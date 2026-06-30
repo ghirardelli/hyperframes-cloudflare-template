@@ -24,6 +24,7 @@ import {
   setDraftPromptTool,
   type GenerateHyperframeOutput,
 } from "@/lib/prompt-agent-contract";
+import type { SelectedGalleryPromptContext } from "@/lib/hyperframe-gallery-catalog";
 import {
   findLatestGeneratedHyperframe,
   findLatestWorkflowRun,
@@ -43,6 +44,7 @@ interface PromptAgentPanelProps {
   modelLabel: string;
   activeProjectId: string;
   activeProjectTitle: string;
+  selectedGalleryContext: SelectedGalleryPromptContext;
   isGenerating: boolean;
   isRendering: boolean;
   onGenerated: (output: GenerateHyperframeOutput) => void;
@@ -70,6 +72,7 @@ export function PromptAgentPanel({
   modelLabel,
   activeProjectId,
   activeProjectTitle,
+  selectedGalleryContext,
   isGenerating,
   isRendering,
   onGenerated,
@@ -84,6 +87,7 @@ export function PromptAgentPanel({
     currentPrompt: prompt,
     durationSec,
     activeProjectTitle: activeProjectTitle || undefined,
+    selectedGalleryContext,
   });
 
   useEffect(() => {
@@ -92,8 +96,9 @@ export function PromptAgentPanel({
       currentPrompt: prompt,
       durationSec,
       activeProjectTitle: activeProjectTitle || undefined,
+      selectedGalleryContext,
     };
-  }, [activeProjectId, activeProjectTitle, durationSec, prompt]);
+  }, [activeProjectId, activeProjectTitle, durationSec, prompt, selectedGalleryContext]);
 
   const connection = useMemo(
     () =>

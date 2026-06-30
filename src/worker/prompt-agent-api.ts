@@ -71,6 +71,7 @@ export async function handlePromptAgentChat({
     forwardedPrompt: forwardedProps.currentPrompt,
     forwardedDurationSec: forwardedProps.durationSec,
     forwardedActiveProjectTitle: forwardedProps.activeProjectTitle,
+    forwardedGalleryContext: forwardedProps.selectedGalleryContext,
     generateHyperframe: async (input) =>
       generateHyperframeOutputSchema.parse(await generateHyperframe(input)),
   };
@@ -117,12 +118,14 @@ function buildPromptAgentSystemPrompt(
 ): string {
   const currentPrompt = forwardedProps.currentPrompt?.trim();
   const activeProject = forwardedProps.activeProjectTitle?.trim();
+  const galleryContext = formatGalleryContext(forwardedProps.selectedGalleryContext);
   return `You are the Motion Frames prompt agent. Help users turn rough ideas into precise prompts for HyperFrames animated HTML video generation.
 
 Active model: ${model}.
 ${activeProject ? `Active project: ${activeProject}.` : "No active project title was provided."}
 ${forwardedProps.durationSec ? `Selected duration: ${forwardedProps.durationSec} seconds.` : "No selected duration was provided; default to 6 seconds unless the user asks otherwise."}
 ${currentPrompt ? `Current editable prompt:\n${currentPrompt}` : "No editable prompt was provided."}
+${galleryContext}
 
 Rules:
 - Keep the conversation concise and practical.
@@ -131,6 +134,7 @@ Rules:
 - Use get_hyperframes_guidelines before claiming any HyperFrames prompt is generation-ready.
 - Use inspect_project_context when project context would materially improve the prompt.
 - Use prepare_prompt_package to validate final prompt packages.
+- If selected gallery context is present, incorporate the examples and components where relevant, preserving exact component names and prompt text vocabulary instead of paraphrasing them away.
 - Use set_draft_prompt when the user wants the draft applied to the editable prompt.
 - Use generate_hyperframe only when the user asks to generate or clearly accepts the prepared prompt; generation requires explicit user approval.
 - If the selected route has fullPipelineAvailable=false and the website-to-video workflow runner is disabled, explicitly disclose that this app can prepare a catalog-informed prompt but cannot run the full HyperFrames workflow yet.
@@ -145,6 +149,25 @@ Rules:
 - If more information is needed, set suggestedNextAction to ask_follow_up and put questions in followUpQuestions.
 - If the prompt is ready but not generated, set suggestedNextAction to apply_prompt or manual_generate.
 - If generation is appropriate, set suggestedNextAction to generate_after_approval.`;
+}
+
+function formatGalleryContext(
+  context: ReturnType<typeof normalizePromptAgentForwardedProps>["selectedGalleryContext"],
+): string {
+  const examples = context?.examples ?? [];
+  const components = context?.components ?? [];
+  if (!examples.length && !components.length) return "No gallery examples or components were selected.";
+
+  const lines = [
+    "Selected gallery context:",
+    ...examples.map(
+      (item) => `- Example: ${item.name} (${item.sourceUrl}) - ${item.promptText}`,
+    ),
+    ...components.map(
+      (item) => `- Component: ${item.name} (${item.sourceUrl}) - ${item.promptText}`,
+    ),
+  ];
+  return lines.join("\n");
 }
 
 function jsonError(message: string, status: number): Response {

@@ -8,12 +8,14 @@ import {
   hyperframesWorkflowRouteOutputSchema,
   hyperframesWorkflowRouteRequestSchema,
 } from "./hyperframes-skill-catalog-schema";
+import { selectedGalleryPromptContextSchema } from "./hyperframe-gallery-catalog-schema";
 
 export const promptAgentForwardedPropsSchema = z.object({
   projectId: z.string().trim().min(1).max(200).optional(),
   currentPrompt: z.string().max(8_000).optional(),
   durationSec: z.number().min(1).max(300).optional(),
   activeProjectTitle: z.string().max(160).optional(),
+  selectedGalleryContext: selectedGalleryPromptContextSchema.optional(),
 });
 
 export type PromptAgentForwardedProps = z.infer<typeof promptAgentForwardedPropsSchema>;
