@@ -43,13 +43,18 @@ const validPromptPackage = {
   followUpQuestions: [],
 };
 
-function runtime(generateHyperframe = vi.fn(), forwardedDurationSec?: number): PromptAgentToolContext {
+function runtime(
+  generateHyperframe = vi.fn(),
+  forwardedDurationSec?: number,
+  materializeHyperframeComponents = vi.fn(),
+): PromptAgentToolContext {
   return {
     env: {} as WorkerEnv,
     auth,
     forwardedProjectId: "project-1",
     forwardedDurationSec,
     generateHyperframe,
+    materializeHyperframeComponents,
   };
 }
 
@@ -163,6 +168,7 @@ describe("prompt agent server tools", () => {
       durationSec: 8,
       projectId: "project-1",
       title: undefined,
+      selectedGalleryContext: undefined,
     });
   });
 
@@ -189,6 +195,73 @@ describe("prompt agent server tools", () => {
       durationSec: 300,
       projectId: "project-1",
       title: undefined,
+      selectedGalleryContext: undefined,
     });
+  });
+
+  it("materializes trusted components through an approval-gated id-and-placement tool", async () => {
+    const output = {
+      projectId: "project-1",
+      indexHtml: "<!doctype html><div data-composition-id=\"app-showcase\"></div>",
+      installedPaths: ["compositions/app-showcase.html"],
+      manifestPath: ".hyperframes/materialized-components.json" as const,
+      manifest: {
+        version: 1 as const,
+        updatedAt: "2026-06-30T12:00:00.000Z",
+        actor: { id: "user-1", type: "agent" as const },
+        snapshotId: null,
+        components: [],
+      },
+      warnings: [],
+    };
+    const materializeHyperframeComponents = vi.fn().mockResolvedValue(output);
+    const tool = getTool("materialize_hyperframe_components");
+
+    expect(tool.needsApproval).toBe(true);
+    await expect(
+      tool.execute(
+        {
+          placements: [
+            {
+              componentId: "app-showcase",
+              startSec: 0,
+              durationSec: 5.5,
+              trackIndex: 1,
+              width: 1920,
+              height: 1080,
+            },
+          ],
+        },
+        { context: runtime(vi.fn(), undefined, materializeHyperframeComponents) } as never,
+      ),
+    ).resolves.toEqual(output);
+    expect(materializeHyperframeComponents).toHaveBeenCalledWith({
+      projectId: "project-1",
+      placements: [
+        {
+          componentId: "app-showcase",
+          startSec: 0,
+          durationSec: 5.5,
+          trackIndex: 1,
+          width: 1920,
+          height: 1080,
+        },
+      ],
+    });
+
+    await expect(
+      tool.execute(
+        {
+          placements: [
+            {
+              componentId: "app-showcase",
+              startSec: 0,
+              componentHtml: "<!doctype html><p>invented</p>",
+            },
+          ],
+        },
+        { context: runtime(vi.fn(), undefined, materializeHyperframeComponents) } as never,
+      ),
+    ).rejects.toThrow(/unrecognized key/i);
   });
 });

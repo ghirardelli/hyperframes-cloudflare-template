@@ -10,6 +10,11 @@ import {
   projects,
 } from "../db/schema";
 import { requireProjectAccess, type AppAuthContext } from "../lib/auth-context";
+import {
+  MATERIALIZED_COMPONENT_MANIFEST_PATH,
+  materializedComponentManifestSchema,
+  type MaterializedComponentManifest,
+} from "../lib/hyperframe-component-materializer-schema";
 import { normalizeProjectPath } from "../lib/project-paths";
 import { projectWorkspaceKey, readProjectObject, writeProjectObject } from "../lib/project-storage";
 import type { WorkerEnv } from "./render-api";
@@ -112,11 +117,13 @@ export async function handleStudioFilesApi(
           )
           .orderBy(asc(projectEntries.path));
         if (entries.length) {
+          const registryFiles = await loadRegistryManagedFiles(db, orgId, projectId);
           return Response.json({
             files: entries.filter((entry) => entry.kind === "text").map((entry) => entry.path),
-            entries,
+            entries: entries.map((entry) => annotateRegistryManagedEntry(entry, registryFiles)),
           });
         }
+        const registryFiles = await loadRegistryManagedFiles(db, orgId, projectId);
         const rows = await db
           .select({ path: projectFiles.path })
           .from(projectFiles)
@@ -124,11 +131,16 @@ export async function handleStudioFilesApi(
           .orderBy(asc(projectFiles.path));
         return Response.json({
           files: rows.map((r) => r.path),
-          entries: rows.map((r) => ({
-            path: r.path,
-            kind: "text",
-            artifactRole: artifactRoleForPath(r.path),
-          })),
+          entries: rows.map((r) =>
+            annotateRegistryManagedEntry(
+              {
+                path: r.path,
+                kind: "text",
+                artifactRole: artifactRoleForPath(r.path),
+              },
+              registryFiles,
+            ),
+          ),
         });
       }
       if (method === "POST") {
@@ -156,6 +168,9 @@ export async function handleStudioFilesApi(
     }
     if (method === "PUT" || method === "PATCH") {
       const body = (await req.json().catch(() => ({}))) as { content?: string; to?: string };
+      if (await isRegistryManagedPath(db, orgId, projectId, path)) {
+        return jsonError("registry-managed component files are read-only; duplicate the file to customize it", 409);
+      }
       if (method === "PATCH" && body.to) {
         const to = safePath(body.to);
         let content = body.content;
@@ -191,6 +206,9 @@ export async function handleStudioFilesApi(
       return await upsertFile(db, context, project, path, body.content ?? "", "save");
     }
     if (method === "DELETE") {
+      if (await isRegistryManagedPath(db, orgId, projectId, path)) {
+        return jsonError("registry-managed component files are read-only; duplicate the file to customize it", 409);
+      }
       await db
         .delete(projectFiles)
         .where(
@@ -357,6 +375,80 @@ export async function handleStudioFilesApi(
   }
 
   return null;
+}
+
+interface RegistryManagedFileInfo {
+  componentId: string;
+  sourceUrl: string;
+  sourceRevision: string;
+  contentHash: string;
+}
+
+async function loadMaterializedComponentManifest(
+  db: ReturnType<typeof createDb>,
+  orgId: string,
+  projectId: string,
+): Promise<MaterializedComponentManifest | null> {
+  const rows = await db
+    .select({ content: projectFiles.content })
+    .from(projectFiles)
+    .where(
+      and(
+        eq(projectFiles.projectId, projectId),
+        eq(projectFiles.organizationId, orgId),
+        eq(projectFiles.path, MATERIALIZED_COMPONENT_MANIFEST_PATH),
+      ),
+    )
+    .limit(1);
+  if (!rows[0]?.content) return null;
+  try {
+    const parsed = materializedComponentManifestSchema.safeParse(JSON.parse(rows[0].content));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadRegistryManagedFiles(
+  db: ReturnType<typeof createDb>,
+  orgId: string,
+  projectId: string,
+): Promise<Map<string, RegistryManagedFileInfo>> {
+  const manifest = await loadMaterializedComponentManifest(db, orgId, projectId);
+  const registryFiles = new Map<string, RegistryManagedFileInfo>();
+  for (const component of manifest?.components ?? []) {
+    for (const file of component.files) {
+      registryFiles.set(file.path, {
+        componentId: component.componentId,
+        sourceUrl: component.source.url,
+        sourceRevision: component.source.revision,
+        contentHash: file.contentHash,
+      });
+    }
+  }
+  return registryFiles;
+}
+
+async function isRegistryManagedPath(
+  db: ReturnType<typeof createDb>,
+  orgId: string,
+  projectId: string,
+  path: string,
+): Promise<boolean> {
+  return (await loadRegistryManagedFiles(db, orgId, projectId)).has(path);
+}
+
+function annotateRegistryManagedEntry<T extends { path: string; artifactRole?: string }>(
+  entry: T,
+  registryFiles: Map<string, RegistryManagedFileInfo>,
+): T & { registryComponent?: RegistryManagedFileInfo } {
+  const registryComponent = registryFiles.get(entry.path);
+  if (!registryComponent) return entry;
+  return {
+    ...entry,
+    artifactRole: "registry-component",
+    registryComponent,
+  };
 }
 
 async function upsertFile(
@@ -704,6 +796,7 @@ function safePath(path: string): string {
 
 function artifactRoleForPath(path: string): string {
   if (path.endsWith("/")) return "folder";
+  if (path === MATERIALIZED_COMPONENT_MANIFEST_PATH) return "registry-manifest";
   if (/^compositions\//.test(path)) return "composition";
   if (/^assets\//.test(path)) return "asset";
   if (/^transcripts?\//.test(path)) return "transcript";

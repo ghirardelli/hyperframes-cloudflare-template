@@ -132,6 +132,7 @@ describe("prompt agent client helpers", () => {
 
   it("formats tool names, states, and previews for compact UI rendering", () => {
     expect(promptAgentToolLabel("generate_hyperframe")).toBe("Generate HyperFrame");
+    expect(promptAgentToolLabel("materialize_hyperframe_components")).toBe("Install trusted components");
     expect(promptAgentToolLabel("start_hyperframes_workflow")).toBe("Start workflow");
     expect(promptAgentToolLabel("list_hyperframes_skill_catalog")).toBe("Skill catalog");
     expect(promptAgentToolLabel("route_hyperframes_workflow")).toBe("Workflow route");

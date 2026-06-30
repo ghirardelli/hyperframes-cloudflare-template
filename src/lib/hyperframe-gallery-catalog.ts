@@ -1,4 +1,5 @@
 import { hyperframeGalleryCatalog } from "../generated/hyperframe-gallery-catalog";
+import { getComponentMaterializationState } from "./hyperframe-component-registry";
 import {
   hyperframeGalleryCatalogSchema,
   selectedGalleryPromptContextSchema,
@@ -128,6 +129,7 @@ export function createSelectedExampleItem(
     name: example.title,
     sourceUrl: example.sourceUrl,
     promptText: example.promptText,
+    materialization: { state: "prompt-only" },
   };
 }
 
@@ -140,6 +142,7 @@ export function createSelectedComponentItem(
     name: component.name,
     sourceUrl: component.sourceUrl,
     promptText: component.promptText,
+    materialization: getComponentMaterializationState(component),
   };
 }
 
@@ -182,9 +185,18 @@ export function buildGalleryPromptText(
   const items = [...normalized.examples, ...normalized.components];
   if (!items.length) return "";
 
-  const lines = items.map(
-    (item) => `- ${item.name} (${item.sourceUrl}): ${compactText(item.promptText, 420)}`,
-  );
+  const lines = items.map((item) => {
+    if (item.kind === "component" && item.materialization.state === "materializable") {
+      return [
+        `- Trusted HyperFrames component: ${item.materialization.componentId} (${item.name})`,
+        `  Source: ${item.sourceUrl}`,
+        `  Canonical host snippet: ${item.materialization.canonicalSnippet}`,
+        "  Do not recreate or author this component's internal HTML. Use the registry-authored block and reference it by component id/snippet only.",
+        `  Prompt context: ${compactText(item.promptText, 360)}`,
+      ].join("\n");
+    }
+    return `- ${item.name} (${item.sourceUrl}): ${compactText(item.promptText, 420)}`;
+  });
   return `Use this selected HyperFrames gallery context:\n${lines.join("\n")}`;
 }
 

@@ -83,6 +83,8 @@ export function promptAgentToolLabel(name: string): string {
       return "Prompt package";
     case "generate_hyperframe":
       return "Generate HyperFrame";
+    case "materialize_hyperframe_components":
+      return "Install trusted components";
     case "start_hyperframes_workflow":
       return "Start workflow";
     case "get_hyperframes_workflow_run":

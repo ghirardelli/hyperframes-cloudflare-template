@@ -512,7 +512,11 @@ function AgentMessage({
                     onClick={() => onApprove(approvalId)}
                   >
                     <Check className="h-4 w-4" aria-hidden="true" />
-                    {part.name === "generate_hyperframe" ? "Approve & Generate" : "Approve"}
+                    {part.name === "generate_hyperframe"
+                      ? "Approve & Generate"
+                      : part.name === "materialize_hyperframe_components"
+                        ? "Approve & Install"
+                        : "Approve"}
                   </Button>
                   <Button
                     type="button"

@@ -42,6 +42,14 @@ import {
   type BunnyEnv,
 } from "../lib/bunny";
 import { DEFAULT_MODEL, generateComposition, GenerateError } from "../lib/generate";
+import { normalizeSelectedGalleryPromptContext, type SelectedGalleryPromptContext } from "../lib/hyperframe-gallery-catalog";
+import {
+  MATERIALIZED_COMPONENT_MANIFEST_PATH,
+  materializeTrustedHyperframeComponents,
+  type MaterializeComponentPlacement,
+  type MaterializeHyperframeComponentsToolOutput,
+  type MaterializeTrustedHyperframeComponentsResult,
+} from "../lib/hyperframe-component-materializer";
 import { normalizeProjectPath } from "../lib/project-paths";
 import {
   deleteProjectObject,
@@ -124,6 +132,8 @@ export async function handleWorkerApi(
       req,
       auth,
       generateHyperframe: (body) => generateAndPersistComposition(env, req, auth, body),
+      materializeHyperframeComponents: (body) =>
+        materializeHyperframeComponentsForProject(env, auth, body),
     });
   }
 
@@ -469,6 +479,7 @@ interface GenerateRequestBody {
   projectId?: string;
   title?: string;
   description?: string;
+  selectedGalleryContext?: SelectedGalleryPromptContext;
 }
 
 async function handleGenerate(
@@ -532,10 +543,24 @@ async function generateAndPersistComposition(
     appTitle: "Motion Frames",
   });
 
-  const project = await upsertGeneratedProject(env, context, body, result.html);
+  const selectedGalleryContext = normalizeSelectedGalleryPromptContext(body.selectedGalleryContext);
+  const materializationPlacements = buildSelectedComponentPlacements(selectedGalleryContext);
+  const materializationResult = materializationPlacements.length
+    ? materializeTrustedHyperframeComponents({
+        indexHtml: result.html,
+        placements: materializationPlacements,
+        actor: { id: context.user.id, type: "user" },
+      })
+    : null;
+  const persistedHtml = materializationResult?.indexHtml ?? result.html;
+
+  const project = await upsertGeneratedProject(env, context, body, persistedHtml);
+  if (project && materializationResult) {
+    await persistMaterializedComponentFiles(env, context, project, materializationResult);
+  }
 
   return {
-    html: result.html,
+    html: persistedHtml,
     project: project
       ? {
           id: project.id,
@@ -548,6 +573,28 @@ async function generateAndPersistComposition(
     lintErrors: result.lintErrors,
     lintOk: result.lintErrors.length === 0,
   };
+}
+
+function buildSelectedComponentPlacements(
+  context: SelectedGalleryPromptContext,
+): Array<MaterializeComponentPlacement> {
+  const placements: Array<MaterializeComponentPlacement> = [];
+  let cursor = 0;
+  for (const item of context.components) {
+    if (item.materialization.state !== "materializable") continue;
+    const durationSec = item.materialization.durationSec;
+    placements.push({
+      componentId: item.materialization.componentId,
+      startSec: cursor,
+      durationSec,
+      trackIndex: 1,
+      width: item.materialization.width,
+      height: item.materialization.height,
+      placementNote: item.materialization.placementIntent,
+    });
+    cursor += durationSec;
+  }
+  return placements;
 }
 
 function assertValidGenerateBody(
@@ -712,6 +759,54 @@ async function recordProjectTextEntry(
     changeKind,
   });
   return versionId;
+}
+
+async function persistMaterializedComponentFiles(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  project: typeof projects.$inferSelect,
+  result: MaterializeTrustedHyperframeComponentsResult,
+): Promise<void> {
+  const db = createDb(env);
+  for (const file of result.files) {
+    await upsertProjectFile(db, context.organization.id, project.id, file.path, file.content);
+    await recordProjectTextEntry(env, context, project, file.path, file.content, file.role);
+  }
+  await createProjectSnapshot(env, context, project.id, "materialize-components");
+}
+
+async function materializeHyperframeComponentsForProject(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  input: {
+    projectId: string;
+    placements: Array<MaterializeComponentPlacement>;
+  },
+): Promise<MaterializeHyperframeComponentsToolOutput> {
+  const project = await requireProjectAccess(context, input.projectId, env, "edit");
+  const sourceHtml = project.currentHtml || defaultProjectHostHtml(project.title);
+  const result = materializeTrustedHyperframeComponents({
+    indexHtml: sourceHtml,
+    placements: input.placements,
+    actor: { id: context.user.id, type: "agent" },
+  });
+
+  await createDb(env)
+    .update(projects)
+    .set({ currentHtml: result.indexHtml, updatedAt: new Date() })
+    .where(eq(projects.id, project.id));
+  await upsertProjectFile(createDb(env), context.organization.id, project.id, "index.html", result.indexHtml);
+  await recordProjectTextEntry(env, context, project, "index.html", result.indexHtml, "materialize-components");
+  await persistMaterializedComponentFiles(env, context, project, result);
+
+  return {
+    projectId: project.id,
+    indexHtml: result.indexHtml,
+    installedPaths: result.files.map((file) => file.path),
+    manifestPath: MATERIALIZED_COMPONENT_MANIFEST_PATH,
+    manifest: result.manifest,
+    warnings: result.warnings,
+  };
 }
 
 async function recordRenderEntry(
@@ -2037,6 +2132,11 @@ function titleFromPrompt(prompt: string): string {
   return words || "Untitled project";
 }
 
+function defaultProjectHostHtml(title: string | null | undefined): string {
+  const safeTitle = escapeHtml(title?.trim() || "HyperFrame project");
+  return `<!doctype html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=1920, height=1080" /><title>${safeTitle}</title></head><body></body></html>`;
+}
+
 function normalizeProjectDescription(description: unknown): string | null {
   if (typeof description !== "string") return null;
   const trimmed = description.trim();
@@ -2057,6 +2157,7 @@ function projectEntryId(projectId: string, path: string): string {
 }
 
 function artifactRoleForPath(path: string): string {
+  if (path === MATERIALIZED_COMPONENT_MANIFEST_PATH) return "registry-manifest";
   if (/^compositions\//.test(path)) return "composition";
   if (/^assets\//.test(path)) return "asset";
   if (/^transcripts?\//.test(path)) return "transcript";
@@ -2065,6 +2166,14 @@ function artifactRoleForPath(path: string): string {
   if (/storyboard/i.test(path)) return "storyboard";
   if (/script/i.test(path)) return "script";
   return "source";
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function mimeForPath(path: string): string {

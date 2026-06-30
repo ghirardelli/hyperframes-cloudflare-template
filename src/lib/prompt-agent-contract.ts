@@ -9,6 +9,10 @@ import {
   hyperframesWorkflowRouteRequestSchema,
 } from "./hyperframes-skill-catalog-schema";
 import { selectedGalleryPromptContextSchema } from "./hyperframe-gallery-catalog-schema";
+import {
+  materializeHyperframeComponentsToolInputSchema,
+  materializeHyperframeComponentsToolOutputSchema,
+} from "./hyperframe-component-materializer-schema";
 
 export const promptAgentForwardedPropsSchema = z.object({
   projectId: z.string().trim().min(1).max(200).optional(),
@@ -121,6 +125,7 @@ export const generateHyperframeInputSchema = z.object({
   durationSec: z.number().min(1).max(300).optional(),
   projectId: z.string().trim().min(1).max(200).optional(),
   title: z.string().max(120).optional(),
+  selectedGalleryContext: selectedGalleryPromptContextSchema.optional(),
 });
 
 export const generateHyperframeOutputSchema = z.object({
@@ -140,6 +145,9 @@ export const generateHyperframeOutputSchema = z.object({
 });
 
 export type GenerateHyperframeOutput = z.infer<typeof generateHyperframeOutputSchema>;
+export type MaterializeHyperframeComponentsOutput = z.infer<
+  typeof materializeHyperframeComponentsToolOutputSchema
+>;
 
 const workflowProgressSchema = z.object({
   current: z.number(),
@@ -266,6 +274,14 @@ export const generateHyperframeTool = toolDefinition({
   description: "Generate a HyperFrame from an approved final prompt and update or create the project.",
   inputSchema: generateHyperframeInputSchema,
   outputSchema: generateHyperframeOutputSchema,
+  needsApproval: true,
+});
+
+export const materializeHyperframeComponentsTool = toolDefinition({
+  name: "materialize_hyperframe_components",
+  description: "Install trusted HyperFrames registry components into a project using component ids and placement data only.",
+  inputSchema: materializeHyperframeComponentsToolInputSchema,
+  outputSchema: materializeHyperframeComponentsToolOutputSchema,
   needsApproval: true,
 });
 

@@ -11,7 +11,12 @@ import {
   normalizePromptAgentForwardedProps,
   promptAgentResultSchema,
   type GenerateHyperframeOutput,
+  type MaterializeHyperframeComponentsOutput,
 } from "../lib/prompt-agent-contract";
+import {
+  materializeHyperframeComponentsToolOutputSchema,
+  type MaterializeComponentPlacement,
+} from "../lib/hyperframe-component-materializer-schema";
 import {
   createPromptAgentServerTools,
   type PromptAgentToolContext,
@@ -28,7 +33,12 @@ export interface PromptAgentChatOptions {
     durationSec?: number;
     projectId?: string;
     title?: string;
+    selectedGalleryContext?: ReturnType<typeof normalizePromptAgentForwardedProps>["selectedGalleryContext"];
   }) => Promise<GenerateHyperframeOutput>;
+  materializeHyperframeComponents: (input: {
+    projectId: string;
+    placements: Array<MaterializeComponentPlacement>;
+  }) => Promise<MaterializeHyperframeComponentsOutput>;
 }
 
 export async function handlePromptAgentChat({
@@ -36,6 +46,7 @@ export async function handlePromptAgentChat({
   req,
   auth,
   generateHyperframe,
+  materializeHyperframeComponents,
 }: PromptAgentChatOptions): Promise<Response> {
   if (env.ENABLE_AI_GEN !== "true") {
     return jsonError(
@@ -74,6 +85,10 @@ export async function handlePromptAgentChat({
     forwardedGalleryContext: forwardedProps.selectedGalleryContext,
     generateHyperframe: async (input) =>
       generateHyperframeOutputSchema.parse(await generateHyperframe(input)),
+    materializeHyperframeComponents: async (input) =>
+      materializeHyperframeComponentsToolOutputSchema.parse(
+        await materializeHyperframeComponents(input),
+      ),
   };
 
   const abortController = new AbortController();
@@ -135,8 +150,10 @@ Rules:
 - Use inspect_project_context when project context would materially improve the prompt.
 - Use prepare_prompt_package to validate final prompt packages.
 - If selected gallery context is present, incorporate the examples and components where relevant, preserving exact component names and prompt text vocabulary instead of paraphrasing them away.
+- When a selected component is marked as a trusted materializable HyperFrames component, reference it by component id and placement only. Do not write, imitate, or recreate its internal composition HTML.
 - Use set_draft_prompt when the user wants the draft applied to the editable prompt.
 - Use generate_hyperframe only when the user asks to generate or clearly accepts the prepared prompt; generation requires explicit user approval.
+- Use materialize_hyperframe_components only after explicit user approval when an existing project should receive selected trusted components. This tool accepts component ids and placement data, never replacement component HTML.
 - If the selected route has fullPipelineAvailable=false and the website-to-video workflow runner is disabled, explicitly disclose that this app can prepare a catalog-informed prompt but cannot run the full HyperFrames workflow yet.
 - If the selected route is /website-to-video and the runner is available, offer start_hyperframes_workflow after explicit approval. Use get_hyperframes_workflow_run for status and summarize skipped steps honestly.
 - start_hyperframes_workflow, continue_hyperframes_workflow, and cancel_hyperframes_workflow require explicit user approval. get_hyperframes_workflow_run is read-only.
@@ -163,9 +180,18 @@ function formatGalleryContext(
     ...examples.map(
       (item) => `- Example: ${item.name} (${item.sourceUrl}) - ${item.promptText}`,
     ),
-    ...components.map(
-      (item) => `- Component: ${item.name} (${item.sourceUrl}) - ${item.promptText}`,
-    ),
+    ...components.map((item) => {
+      if (item.materialization.state !== "materializable") {
+        return `- Component: ${item.name} (${item.sourceUrl}) - prompt-only reference - ${item.promptText}`;
+      }
+      return [
+        `- Component: ${item.name} (${item.sourceUrl})`,
+        `  Materialization: trusted component id ${item.materialization.componentId}; use materialize_hyperframe_components or generation selected-context metadata for real project insertion.`,
+        `  Canonical snippet: ${item.materialization.canonicalSnippet}`,
+        "  Do not recreate this component's internal HTML.",
+        `  Prompt text: ${item.promptText}`,
+      ].join("\n");
+    }),
   ];
   return lines.join("\n");
 }

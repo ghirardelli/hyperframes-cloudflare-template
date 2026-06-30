@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { componentMaterializationStateSchema } from "./hyperframe-component-registry-schema";
+
 const HASH_PATTERN = /^sha256:[a-f0-9]{64}$/;
 
 export const gallerySourceTypeSchema = z.enum([
@@ -76,6 +78,7 @@ export const selectedGalleryPromptItemSchema = z.object({
   name: z.string().min(1).max(180),
   sourceUrl: z.string().url(),
   promptText: z.string().min(1).max(1_500),
+  materialization: componentMaterializationStateSchema.default({ state: "prompt-only" }),
 });
 
 export const selectedGalleryPromptContextSchema = z.object({

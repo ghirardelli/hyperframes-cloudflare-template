@@ -30,7 +30,13 @@ const workerMocks = vi.hoisted(() => {
     projects: [] as Array<Record<string, unknown>>,
     insertedProjects: [] as Array<Record<string, unknown>>,
     insertedMembers: [] as Array<Record<string, unknown>>,
+    projectFiles: [] as Array<Record<string, unknown>>,
+    projectEntries: [] as Array<Record<string, unknown>>,
+    projectEntryVersions: [] as Array<Record<string, unknown>>,
+    projectSnapshots: [] as Array<Record<string, unknown>>,
+    projectVersions: [] as Array<Record<string, unknown>>,
     projectAccess: new Map<string, Record<string, unknown> | Error>(),
+    generateComposition: vi.fn(),
   };
 
   function tableName(table: unknown): string {
@@ -69,7 +75,12 @@ const workerMocks = vi.hoisted(() => {
     }
 
     execute() {
-      const rows = this.table === "projects" ? filteredProjects(this.conditions) : [];
+      const rows =
+        this.table === "projects"
+          ? filteredProjects(this.conditions)
+          : this.table === "project_entry_versions"
+            ? state.projectEntryVersions
+            : [];
       if (this.table === "projects" && this.shape && "project" in this.shape) {
         return rows.map((project) => ({ project }));
       }
@@ -144,12 +155,25 @@ const workerMocks = vi.hoisted(() => {
         });
       }
       if (this.table === "project_members") state.insertedMembers.push(value);
+      if (this.table === "project_files") state.projectFiles.push(value);
+      if (this.table === "project_entries") state.projectEntries.push(value);
+      if (this.table === "project_entry_versions") state.projectEntryVersions.push(value);
+      if (this.table === "project_snapshots") state.projectSnapshots.push(value);
+      if (this.table === "project_versions") state.projectVersions.push(value);
+      return this;
+    }
+
+    onConflictDoUpdate() {
       return this;
     }
 
     returning() {
       if (this.table === "projects") return Promise.resolve([state.projects[0]]);
       return Promise.resolve(this.rows);
+    }
+
+    then(resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) {
+      return Promise.resolve(this.rows).then(resolve, reject);
     }
   }
 
@@ -185,8 +209,14 @@ const workerMocks = vi.hoisted(() => {
     state.projects = [];
     state.insertedProjects = [];
     state.insertedMembers = [];
+    state.projectFiles = [];
+    state.projectEntries = [];
+    state.projectEntryVersions = [];
+    state.projectSnapshots = [];
+    state.projectVersions = [];
     state.projectAccess = new Map();
     state.authContext = authContext;
+    state.generateComposition.mockReset();
   }
 
   return {
@@ -210,9 +240,7 @@ vi.mock("../lib/generate", () => ({
   GenerateError: class GenerateError extends Error {
     status = 500;
   },
-  generateComposition: () => {
-    throw new Error("generation is not used in this unit test");
-  },
+  generateComposition: workerMocks.state.generateComposition,
 }));
 
 vi.mock("../db", () => ({
@@ -238,6 +266,10 @@ vi.mock("../lib/auth-context", () => ({
 
 import { handleWorkerApi, type WorkerEnv } from "./render-api";
 import { projects } from "../db/schema";
+import {
+  createSelectedComponentItem,
+  listGalleryComponents,
+} from "../lib/hyperframe-gallery-catalog";
 
 describe("handleWorkerApi", () => {
   beforeEach(() => {
@@ -311,6 +343,63 @@ describe("handleWorkerApi", () => {
       description: "A short launch-week edit",
     });
     expect(body.project.description).toBe("A short launch-week edit");
+  });
+
+  it("materializes selected trusted components when generating a project", async () => {
+    workerMocks.state.generateComposition.mockResolvedValue({
+      html: "<!doctype html><html><body><main>Generated host</main></body></html>",
+      model: "openrouter/test",
+      attempts: 1,
+      durationMs: 25,
+      lintErrors: [],
+    });
+    const appShowcase = listGalleryComponents().find((component) => component.id === "app-showcase")!;
+
+    const response = await handleWorkerApi(
+      new Request("https://motion-frames.test/api/generate", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://motion-frames.test",
+        },
+        body: JSON.stringify({
+          prompt: "Use the trusted app showcase block as the opening scene.",
+          durationSec: 8,
+          selectedGalleryContext: {
+            examples: [],
+            components: [createSelectedComponentItem(appShowcase)],
+          },
+        }),
+      }),
+      {
+        ENABLE_AI_GEN: "true",
+        OPENROUTER_API_KEY: "test-key",
+      } as WorkerEnv,
+    );
+
+    const errorBody = response?.status === 200 ? null : await response?.clone().json();
+    expect(response?.status, JSON.stringify(errorBody)).toBe(200);
+    const body = (await response?.json()) as { html: string };
+    expect(body.html).toContain("hyperframes-materialized-component:app-showcase:begin");
+    expect(body.html).toContain('data-composition-src="compositions/app-showcase.html"');
+
+    expect(workerMocks.state.projectFiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "index.html",
+          content: expect.stringContaining("hyperframes-materialized-component:app-showcase:begin"),
+        }),
+        expect.objectContaining({
+          path: "compositions/app-showcase.html",
+          content: expect.stringContaining("hyperframes-registry-item: app-showcase"),
+        }),
+        expect.objectContaining({
+          path: ".hyperframes/materialized-components.json",
+          content: expect.stringContaining('"componentId": "app-showcase"'),
+        }),
+      ]),
+    );
+    expect(workerMocks.state.projectSnapshots.length).toBeGreaterThanOrEqual(1);
   });
 
   it("trims and clears optional project descriptions when updating metadata", async () => {

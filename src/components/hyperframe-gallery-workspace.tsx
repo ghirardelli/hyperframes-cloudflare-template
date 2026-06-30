@@ -15,6 +15,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { getComponentMaterializationState } from "@/lib/hyperframe-component-registry";
 import {
   createSelectedComponentItem,
   createSelectedExampleItem,
@@ -403,6 +404,7 @@ function ComponentCard({
   onToggle: () => void;
   onInfo: () => void;
 }) {
+  const materializationState = getComponentMaterializationState(component);
   return (
     <article
       className={cn(
@@ -434,6 +436,9 @@ function ComponentCard({
         </div>
         <div className="mt-auto flex flex-wrap items-center gap-1">
           <Badge variant="outline">{component.category}</Badge>
+          <Badge variant={materializationState.state === "materializable" ? "secondary" : "outline"}>
+            {materializationState.state === "materializable" ? "Installable" : "Prompt"}
+          </Badge>
           {component.tags.slice(0, 3).map((tag) => (
             <Badge key={tag} variant="secondary">
               {tag}
@@ -493,6 +498,7 @@ function ComponentDetailModal({
   onCopy: () => void;
   onToggle: () => void;
 }) {
+  const materializationState = getComponentMaterializationState(component);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 px-4 py-6">
       <div
@@ -525,6 +531,9 @@ function ComponentDetailModal({
             <div className="space-y-3">
               <p className="text-sm text-body">{component.detail}</p>
               <div className="flex flex-wrap gap-1">
+                <Badge variant={materializationState.state === "materializable" ? "secondary" : "outline"}>
+                  {materializationState.state === "materializable" ? "Installable block" : "Prompt reference"}
+                </Badge>
                 {component.tags.slice(0, 8).map((tag) => (
                   <Badge key={tag} variant="secondary">
                     {tag}
@@ -603,12 +612,23 @@ function formatDuration(seconds: number): string {
 export function buildPromptContextFromIds(input: {
   exampleIds: ReadonlyArray<string>;
   componentIds: ReadonlyArray<string>;
+  componentPlacementIntents?: Record<string, string>;
 }): SelectedGalleryPromptContext {
   const examples = listGalleryExamples()
     .filter((example) => input.exampleIds.includes(example.id))
     .map(createSelectedExampleItem);
   const components = listGalleryComponents()
     .filter((component) => input.componentIds.includes(component.id))
-    .map(createSelectedComponentItem);
+    .map((component) => {
+      const item = createSelectedComponentItem(component);
+      const placementIntent = input.componentPlacementIntents?.[component.id]?.trim();
+      if (placementIntent && item.materialization.state === "materializable") {
+        item.materialization = {
+          ...item.materialization,
+          placementIntent,
+        };
+      }
+      return item;
+    });
   return { examples, components };
 }

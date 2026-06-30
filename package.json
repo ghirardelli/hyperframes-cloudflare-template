@@ -41,6 +41,8 @@
     "check:hyperframes-skills": "node scripts/sync-hyperframes-skills.mjs --check",
     "sync:hyperframe-gallery": "node scripts/sync-hyperframe-gallery-catalog.mjs",
     "check:hyperframe-gallery": "node scripts/sync-hyperframe-gallery-catalog.mjs --check",
+    "sync:hyperframe-components": "node scripts/sync-hyperframe-component-registry.mjs",
+    "check:hyperframe-components": "node scripts/sync-hyperframe-component-registry.mjs --check",
     "pretypecheck": "wrangler types",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",

@@ -11,6 +11,8 @@ import {
   usePlayerStore,
 } from "@hyperframes/studio";
 
+import { useToast } from "@/components/ui/toast";
+
 export interface StudioRenderItem {
   id: string;
   url: string;
@@ -41,6 +43,12 @@ export interface StudioFileEntry {
   contentType?: string | null;
   size?: number;
   updatedAt?: string | Date;
+  registryComponent?: {
+    componentId: string;
+    sourceUrl: string;
+    sourceRevision: string;
+    contentHash: string;
+  };
 }
 
 interface StudioShareState {
@@ -78,7 +86,6 @@ export interface StudioEditorProps {
   onPublish?: (html: string) => Promise<void> | void;
 }
 
-type Tone = "idle" | "busy" | "ok" | "error";
 type LeftTab = "code" | "compositions" | "assets";
 type RightTab = "properties" | "renders" | "share" | "versions" | "search";
 
@@ -115,12 +122,12 @@ export default function StudioEditor({
 
   const [html, setHtml] = useState(initialHtml);
   const [dirty, setDirty] = useState(false);
-  const [status, setStatus] = useState<{ tone: Tone; message: string }>({ tone: "idle", message: "" });
   const [renders, setRenders] = useState<StudioRenderItem[]>(initialRenders);
   const [resolution, setResolution] = useState(RESOLUTIONS[0]);
   const [durationSec, setDurationSec] = useState(6);
   const [format, setFormat] = useState<(typeof FORMATS)[number]>("mp4");
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
 
   // Multi-file state
   const [files, setFiles] = useState<string[]>([]);
@@ -171,7 +178,7 @@ export default function StudioEditor({
         setFiles(d.files.length ? d.files : ["index.html"]);
         setEntries(d.entries ?? d.files.map((path) => ({ path, kind: "text" })));
       })
-      .catch((err) => setStatus({ tone: "error", message: messageFromError(err) }));
+      .catch((err) => toast.error(messageFromError(err)));
     api<{ assets: StudioAssetItem[] }>(`${apiBase}/assets`)
       .then((d) => setAssets(d.assets))
       .catch(() => {});
@@ -191,7 +198,7 @@ export default function StudioEditor({
       setActiveCompositionPath(path === "index.html" ? null : path);
       await loadVersions(path);
     } catch (err) {
-      setStatus({ tone: "error", message: messageFromError(err) });
+      toast.error(messageFromError(err));
     }
   }
 
@@ -210,14 +217,24 @@ export default function StudioEditor({
   }
 
   const handleSourceChange = useCallback((next: string) => {
+    const activeEntry = entries.find((entry) => entry.path === activeFile);
+    if (activeEntry?.artifactRole === "registry-component") {
+      toast.error("Registry-managed component files are read-only. Duplicate the file to customize it.");
+      return;
+    }
     setHtml(next);
     setDirty(true);
-  }, []);
+  }, [activeFile, entries]);
 
   async function save(): Promise<boolean> {
     try {
+      const activeEntry = entries.find((entry) => entry.path === activeFile);
+      if (activeEntry?.artifactRole === "registry-component") {
+        toast.error("Registry-managed component files are read-only. Duplicate the file to customize it.");
+        return false;
+      }
       setBusy(true);
-      setStatus({ tone: "busy", message: "Saving…" });
+      toast.info("Saving...");
       if (fileMode) {
         await api(`${apiBase}/files/${encodeURIComponent(activeFile)}`, {
           method: "PUT",
@@ -231,11 +248,11 @@ export default function StudioEditor({
         await onSave(html);
       }
       setDirty(false);
-      setStatus({ tone: "ok", message: "Saved." });
+      toast.success("Saved.");
       reload();
       return true;
     } catch (err) {
-      setStatus({ tone: "error", message: messageFromError(err) });
+      toast.error(messageFromError(err));
       return false;
     } finally {
       setBusy(false);
@@ -247,7 +264,7 @@ export default function StudioEditor({
     if (dirty && !(await save())) return;
     try {
       setBusy(true);
-      setStatus({ tone: "busy", message: "Rendering…" });
+      toast.info("Rendering...");
       const result = await onRender({
         html,
         width: resolution.width,
@@ -256,9 +273,9 @@ export default function StudioEditor({
         format,
       });
       if (result && result.url) setRenders((prev) => [result, ...prev]);
-      setStatus({ tone: "ok", message: "Render complete." });
+      toast.success("Render complete.");
     } catch (err) {
-      setStatus({ tone: "error", message: messageFromError(err) });
+      toast.error(messageFromError(err));
     } finally {
       setBusy(false);
     }
@@ -269,11 +286,11 @@ export default function StudioEditor({
     if (dirty && !(await save())) return;
     try {
       setBusy(true);
-      setStatus({ tone: "busy", message: "Publishing…" });
+      toast.info("Publishing...");
       await onPublish(html);
-      setStatus({ tone: "ok", message: "Published to your organization." });
+      toast.success("Published to your organization.");
     } catch (err) {
-      setStatus({ tone: "error", message: messageFromError(err) });
+      toast.error(messageFromError(err));
     } finally {
       setBusy(false);
     }
@@ -290,8 +307,9 @@ export default function StudioEditor({
       setFiles((prev) => Array.from(new Set([...prev, path])).sort());
       setEntries((prev) => Array.from(new Map([...prev, { path, kind: "text" }].map((e) => [e.path, e])).values()).sort((a, b) => a.path.localeCompare(b.path)));
       await loadFile(path);
+      toast.success("File created.");
     } catch (err) {
-      setStatus({ tone: "error", message: messageFromError(err) });
+      toast.error(messageFromError(err));
     }
   }
 
@@ -302,8 +320,30 @@ export default function StudioEditor({
       setFiles((prev) => prev.filter((p) => p !== path));
       setEntries((prev) => prev.filter((entry) => entry.path !== path));
       if (activeFile === path) await loadFile("index.html");
+      toast.success("File deleted.");
     } catch (err) {
-      setStatus({ tone: "error", message: messageFromError(err) });
+      toast.error(messageFromError(err));
+    }
+  }
+
+  async function customizeRegistryFile() {
+    if (!activeRegistryComponent) return;
+    const nextPath = activeFile.replace(/(^|\/)([^/]+)$/, "$1custom-$2");
+    try {
+      setBusy(true);
+      toast.info("Creating customizable copy...");
+      await api(`${apiBase}/duplicate-file`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ from: activeFile, to: nextPath }),
+      });
+      reload();
+      await loadFile(nextPath);
+      toast.success("Custom copy created.");
+    } catch (err) {
+      toast.error(messageFromError(err));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -311,7 +351,7 @@ export default function StudioEditor({
     if (!fileMode) return;
     const path = `assets/${file.name}`;
     try {
-      setStatus({ tone: "busy", message: `Uploading ${file.name}…` });
+      toast.info(`Uploading ${file.name}...`);
       const item = await api<StudioAssetItem>(
         `${apiBase}/assets?path=${encodeURIComponent(path)}`,
         { method: "POST", headers: { "content-type": file.type || "application/octet-stream" }, body: file },
@@ -320,9 +360,9 @@ export default function StudioEditor({
       setEntries((prev) =>
         Array.from(new Map([...prev, { path: item.path, kind: "binary", artifactRole: "asset", contentType: item.contentType, size: item.size }].map((e) => [e.path, e])).values()).sort((a, b) => a.path.localeCompare(b.path)),
       );
-      setStatus({ tone: "ok", message: `Uploaded ${file.name}` });
+      toast.success(`Uploaded ${file.name}`);
     } catch (err) {
-      setStatus({ tone: "error", message: messageFromError(err) });
+      toast.error(messageFromError(err));
     }
   }
 
@@ -335,9 +375,9 @@ export default function StudioEditor({
         body: JSON.stringify({ visibility }),
       });
       setShare((prev) => (prev ? { ...prev, visibility: data.project.visibility } : prev));
-      setStatus({ tone: "ok", message: visibility === "organization" ? "Shared with organization." : "Project is private." });
+      toast.success(visibility === "organization" ? "Shared with organization." : "Project is private.");
     } catch (err) {
-      setStatus({ tone: "error", message: messageFromError(err) });
+      toast.error(messageFromError(err));
     }
   }
 
@@ -346,9 +386,9 @@ export default function StudioEditor({
     try {
       await api(`${apiBase}/versions/${encodeURIComponent(versionId)}/restore`, { method: "POST" });
       await loadFile(activeFile);
-      setStatus({ tone: "ok", message: "Version restored." });
+      toast.success("Version restored.");
     } catch (err) {
-      setStatus({ tone: "error", message: messageFromError(err) });
+      toast.error(messageFromError(err));
     }
   }
 
@@ -358,11 +398,13 @@ export default function StudioEditor({
       const data = await api<StudioSearchResponse>(`/api/projects/search?q=${encodeURIComponent(searchQuery.trim())}`);
       setSearchResults(data);
     } catch (err) {
-      setStatus({ tone: "error", message: messageFromError(err) });
+      toast.error(messageFromError(err));
     }
   }
 
   const compositions = files.filter((f) => /\.html?$/i.test(f));
+  const activeEntry = entries.find((entry) => entry.path === activeFile);
+  const activeRegistryComponent = activeEntry?.registryComponent;
   const playerDirectUrl = fileMode
     ? activeCompositionPath
       ? `${apiBase}/preview/${activeCompositionPath}`
@@ -379,6 +421,17 @@ export default function StudioEditor({
           <span className="truncate text-sm font-medium">{title}</span>
           {dirty ? (
             <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-300">Unsaved</span>
+          ) : null}
+          {activeRegistryComponent ? (
+            <a
+              href={activeRegistryComponent.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded bg-[#0066cc]/20 px-1.5 py-0.5 text-[11px] text-[#7cc0ff] hover:bg-[#0066cc]/30"
+              title={`${activeRegistryComponent.componentId} · ${activeRegistryComponent.sourceRevision} · ${activeRegistryComponent.contentHash}`}
+            >
+              Registry-managed
+            </a>
           ) : null}
         </div>
         <div className="flex items-center gap-2">
@@ -423,9 +476,14 @@ export default function StudioEditor({
           >
             {picker.isPickMode ? "Selecting…" : "Select"}
           </button>
-          <button type="button" onClick={() => void save()} disabled={busy} className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs font-medium hover:border-neutral-600 disabled:opacity-50">
+          <button type="button" onClick={() => void save()} disabled={busy || Boolean(activeRegistryComponent)} className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs font-medium hover:border-neutral-600 disabled:opacity-50">
             Save
           </button>
+          {activeRegistryComponent ? (
+            <button type="button" onClick={() => void customizeRegistryFile()} disabled={busy} className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs font-medium hover:border-neutral-600 disabled:opacity-50">
+              Customize copy
+            </button>
+          ) : null}
           <button type="button" onClick={() => void render()} disabled={busy || !onRender} className="rounded-md bg-[#0066cc] px-3 py-1 text-xs font-medium text-white hover:bg-[#0a73db] disabled:opacity-50">
             Render
           </button>
@@ -601,10 +659,6 @@ export default function StudioEditor({
           </div>
         </aside>
       </div>
-
-      <footer className="flex-shrink-0 border-t border-neutral-800 px-4 py-1.5 text-xs">
-        <span className={statusClass(status.tone)}>{status.message || "Ready"}</span>
-      </footer>
     </div>
   );
 }
@@ -772,13 +826,6 @@ function PropertyControls({
       </label>
     </div>
   );
-}
-
-function statusClass(tone: Tone): string {
-  if (tone === "error") return "text-red-400";
-  if (tone === "ok") return "text-emerald-400";
-  if (tone === "busy") return "text-neutral-300";
-  return "text-neutral-500";
 }
 
 function messageFromError(err: unknown): string {

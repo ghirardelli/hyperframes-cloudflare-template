@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   Bot,
-  CheckCircle2,
   Clock3,
   Download,
   Film,
@@ -33,6 +32,7 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/ui/toast";
 import {
   buildRenderRequestBody,
   DEFAULT_CREATION_MODE,
@@ -75,8 +75,6 @@ import type { GenerateHyperframeOutput } from "@/lib/prompt-agent-contract";
 export const Route = createFileRoute("/")({
   component: MotionFramesHome,
 });
-
-type StatusTone = "idle" | "success" | "error";
 
 interface ConfigResponse {
   aiGenEnabled: boolean;
@@ -136,6 +134,7 @@ function MotionFramesHome() {
   const [activeComponentCategory, setActiveComponentCategory] = useState("All");
   const [selectedExampleIds, setSelectedExampleIds] = useState<Array<string>>([]);
   const [selectedComponentIds, setSelectedComponentIds] = useState<Array<string>>([]);
+  const [componentPlacementIntents, setComponentPlacementIntents] = useState<Record<string, string>>({});
   const [generatedHtml, setGeneratedHtml] = useState("");
   const [aiEnabled, setAiEnabled] = useState(false);
   const [modelLabel, setModelLabel] = useState("");
@@ -146,10 +145,7 @@ function MotionFramesHome() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
   const [renderUrl, setRenderUrl] = useState("");
-  const [status, setStatus] = useState<{ tone: StatusTone; message: string }>({
-    tone: "idle",
-    message: "",
-  });
+  const toast = useToast();
 
   const activeSource = generatedHtml ? "Generated HTML" : "Bundled intro";
   const hasGeneratedOutput = Boolean(generatedHtml || activeProjectId);
@@ -174,8 +170,9 @@ function MotionFramesHome() {
       buildPromptContextFromIds({
         exampleIds: selectedExampleIds,
         componentIds: selectedComponentIds,
+        componentPlacementIntents,
       }),
-    [selectedComponentIds, selectedExampleIds],
+    [componentPlacementIntents, selectedComponentIds, selectedExampleIds],
   );
   const selectedGalleryCount = countSelectedGalleryItems(selectedGalleryContext);
 
@@ -239,12 +236,6 @@ function MotionFramesHome() {
     player.setAttribute("src", "/api/preview");
   }, [generatedHtml, workspaceSurface]);
 
-  const statusClassName = useMemo(() => {
-    if (status.tone === "success") return "border-emerald-400/70 bg-emerald-50 text-emerald-900";
-    if (status.tone === "error") return "border-red-300 bg-red-50 text-red-900";
-    return "border-hairline bg-white text-body";
-  }, [status.tone]);
-
   function selectCreationTab(tab: CreationTab) {
     if (tab === "agent" && !canUseAgentTab) return;
     setActiveCreationTab(tab);
@@ -261,7 +252,7 @@ function MotionFramesHome() {
     if (!canGenerate) return;
     setIsGenerating(true);
     setRenderUrl("");
-    setStatus({ tone: "idle", message: "Generating composition..." });
+    toast.info("Generating composition...");
 
     try {
       const response = await fetch("/api/generate", {
@@ -271,6 +262,7 @@ function MotionFramesHome() {
           prompt: prompt.trim(),
           durationSec,
           projectId: activeProjectId || undefined,
+          selectedGalleryContext: selectedGalleryCount ? selectedGalleryContext : undefined,
         }),
       });
       const data = (await response.json()) as GenerateResponse;
@@ -284,12 +276,12 @@ function MotionFramesHome() {
         setActiveProjectId(data.project.id);
         setActiveProjectTitle(data.project.title);
       }
-      setStatus({
-        tone: data.lintOk ? "success" : "idle",
+      toast.show({
+        tone: data.lintOk ? "success" : "warning",
         message: `Generated with ${data.model ?? "selected model"} in ${data.attempts ?? 1} attempt(s).`,
       });
     } catch (err) {
-      setStatus({ tone: "error", message: messageFromError(err) });
+      toast.error(messageFromError(err));
     } finally {
       setIsGenerating(false);
     }
@@ -303,8 +295,8 @@ function MotionFramesHome() {
       setActiveProjectId(data.project.id);
       setActiveProjectTitle(data.project.title);
     }
-    setStatus({
-      tone: data.lintOk ? "success" : "idle",
+    toast.show({
+      tone: data.lintOk ? "success" : "warning",
       message: `Generated with ${data.model} in ${data.attempts} attempt(s).`,
     });
   }
@@ -313,7 +305,7 @@ function MotionFramesHome() {
     if (!canRender) return;
     setIsRendering(true);
     setRenderUrl("");
-    setStatus({ tone: "idle", message: `Rendering ${renderFormatName}...` });
+    toast.info(`Rendering ${renderFormatName}...`);
 
     try {
       const body = buildRenderRequestBody({
@@ -333,12 +325,11 @@ function MotionFramesHome() {
       }
 
       setRenderUrl(data.url);
-      setStatus({
-        tone: "success",
-        message: `Rendered ${data.source ?? "composition"} as ${renderFormatName} in ${formatDuration(data.durationMs)}.`,
-      });
+      toast.success(
+        `Rendered ${data.source ?? "composition"} as ${renderFormatName} in ${formatDuration(data.durationMs)}.`,
+      );
     } catch (err) {
-      setStatus({ tone: "error", message: messageFromError(err) });
+      toast.error(messageFromError(err));
     } finally {
       setIsRendering(false);
     }
@@ -350,7 +341,7 @@ function MotionFramesHome() {
     setActiveProjectId("");
     setActiveProjectTitle("");
     setWorkspaceSurface("gallery");
-    setStatus({ tone: "idle", message: "" });
+    toast.info("Composition reset.");
   }
 
   function toggleExampleSelection(example: GalleryExample) {
@@ -360,9 +351,16 @@ function MotionFramesHome() {
   }
 
   function toggleComponentSelection(component: GalleryComponent) {
-    setSelectedComponentIds((current) =>
-      toggleGallerySelectionId(current, component.id, GALLERY_COMPONENT_SELECTION_LIMIT),
-    );
+    setSelectedComponentIds((current) => {
+      const next = toggleGallerySelectionId(current, component.id, GALLERY_COMPONENT_SELECTION_LIMIT);
+      if (current.includes(component.id) && !next.includes(component.id)) {
+        setComponentPlacementIntents((intents) => {
+          const { [component.id]: _removed, ...rest } = intents;
+          return rest;
+        });
+      }
+      return next;
+    });
   }
 
   function removeSelectedExample(exampleId: string) {
@@ -371,15 +369,23 @@ function MotionFramesHome() {
 
   function removeSelectedComponent(componentId: string) {
     setSelectedComponentIds((current) => removeGallerySelectionId(current, componentId));
+    setComponentPlacementIntents((current) => {
+      const { [componentId]: _removed, ...rest } = current;
+      return rest;
+    });
+  }
+
+  function updateComponentPlacementIntent(componentId: string, placementIntent: string) {
+    setComponentPlacementIntents((current) => ({
+      ...current,
+      [componentId]: placementIntent,
+    }));
   }
 
   function insertSelectedGalleryContext() {
     if (!selectedGalleryCount) return;
     setPrompt((current) => appendGalleryPromptText(current, selectedGalleryContext));
-    setStatus({
-      tone: "success",
-      message: "Added selected gallery context to the prompt.",
-    });
+    toast.success("Added selected gallery context to the prompt.");
   }
 
   if (!me) {
@@ -498,12 +504,13 @@ function MotionFramesHome() {
                 </button>
               </div>
 
-              <SelectedGalleryContextChips
-                context={selectedGalleryContext}
-                disabled={isGenerating || isRendering}
-                onRemoveExample={removeSelectedExample}
-                onRemoveComponent={removeSelectedComponent}
-              />
+          <SelectedGalleryContextChips
+            context={selectedGalleryContext}
+            disabled={isGenerating || isRendering}
+            onRemoveExample={removeSelectedExample}
+            onRemoveComponent={removeSelectedComponent}
+            onUpdateComponentPlacementIntent={updateComponentPlacementIntent}
+          />
 
               {visibleCreationTab !== "render" ? (
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -674,14 +681,6 @@ function MotionFramesHome() {
             </CardContent>
           </Card>
 
-          {status.message ? (
-            <div className={`rounded-lg border p-3 text-sm ${statusClassName}`}>
-              <div className="flex items-start gap-2">
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                <span>{status.message}</span>
-              </div>
-            </div>
-          ) : null}
         </aside>
       </main>
     </div>
@@ -693,24 +692,31 @@ function SelectedGalleryContextChips({
   disabled,
   onRemoveExample,
   onRemoveComponent,
+  onUpdateComponentPlacementIntent,
 }: {
   context: SelectedGalleryPromptContext;
   disabled: boolean;
   onRemoveExample: (exampleId: string) => void;
   onRemoveComponent: (componentId: string) => void;
+  onUpdateComponentPlacementIntent: (componentId: string, placementIntent: string) => void;
 }) {
   const items = [
     ...context.examples.map((item) => ({
       ...item,
       label: "Example",
+      stateLabel: "Prompt reference",
       onRemove: () => onRemoveExample(item.id),
     })),
     ...context.components.map((item) => ({
       ...item,
       label: "Component",
+      stateLabel: item.materialization.state === "materializable" ? "Installable block" : "Prompt reference",
       onRemove: () => onRemoveComponent(item.id),
     })),
   ];
+  const materializableComponents = context.components.filter(
+    (item) => item.materialization.state === "materializable",
+  );
 
   if (!items.length) return null;
 
@@ -730,6 +736,9 @@ function SelectedGalleryContextChips({
           >
             <span className="shrink-0 text-xs text-emerald-700">{item.label}</span>
             <span className="min-w-0 truncate">{item.name}</span>
+            <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[0.68rem] font-semibold text-emerald-800">
+              {item.stateLabel}
+            </span>
             <button
               type="button"
               disabled={disabled}
@@ -742,6 +751,30 @@ function SelectedGalleryContextChips({
           </span>
         ))}
       </div>
+      {materializableComponents.length ? (
+        <div className="mt-3 space-y-2">
+          {materializableComponents.map((item) => {
+            const { materialization } = item;
+            if (materialization.state !== "materializable") return null;
+            return (
+              <div key={item.id} className="space-y-1">
+                <Label htmlFor={`placement-${item.id}`} className="text-xs text-emerald-900">
+                  {item.name} placement
+                </Label>
+                <Textarea
+                  id={`placement-${item.id}`}
+                  value={materialization.placementIntent ?? ""}
+                  onChange={(event) => onUpdateComponentPlacementIntent(item.id, event.target.value)}
+                  placeholder="Opening scene, product demo beat, final CTA..."
+                  rows={2}
+                  disabled={disabled}
+                  className="min-h-16 border-emerald-200 bg-white/80 text-sm focus-visible:border-emerald-500"
+                />
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

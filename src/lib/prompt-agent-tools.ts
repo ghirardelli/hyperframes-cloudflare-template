@@ -9,19 +9,28 @@ import {
   inspectProjectContextTool,
   listHyperframesSkillCatalogTool,
   loadHyperframesSkillTool,
+  materializeHyperframeComponentsTool,
   preparePromptPackageTool,
   promptAgentResultSchema,
   routeHyperframesWorkflowTool,
   startHyperframesWorkflowTool,
   type GenerateHyperframeOutput,
+  type MaterializeHyperframeComponentsOutput,
 } from "./prompt-agent-contract";
+import {
+  materializeHyperframeComponentsToolInputSchema,
+  type MaterializeComponentPlacement,
+} from "./hyperframe-component-materializer-schema";
 import {
   listHyperframesSkillCatalog,
   loadHyperframesSkill,
   routeHyperframesWorkflow,
 } from "./hyperframes-skill-catalog";
 import type { WorkerEnv } from "../worker/render-api";
-import type { SelectedGalleryPromptContext } from "./hyperframe-gallery-catalog";
+import {
+  normalizeSelectedGalleryPromptContext,
+  type SelectedGalleryPromptContext,
+} from "./hyperframe-gallery-catalog";
 import {
   cancelWebsiteToVideoWorkflowRun,
   continueWebsiteToVideoWorkflowRun,
@@ -42,7 +51,12 @@ export interface PromptAgentToolContext {
     durationSec?: number;
     projectId?: string;
     title?: string;
+    selectedGalleryContext?: SelectedGalleryPromptContext;
   }) => Promise<GenerateHyperframeOutput>;
+  materializeHyperframeComponents?: (input: {
+    projectId: string;
+    placements: Array<MaterializeComponentPlacement>;
+  }) => Promise<MaterializeHyperframeComponentsOutput>;
 }
 
 export function createPromptAgentServerTools() {
@@ -87,11 +101,28 @@ export function createPromptAgentServerTools() {
     preparePromptPackageTool.server(async (args) => promptAgentResultSchema.parse(args)),
     generateHyperframeTool.server(async (args, execution) => {
       const runtime = requireRuntimeContext(execution?.context as PromptAgentToolContext | undefined);
+      const selectedGalleryContext = args.selectedGalleryContext ?? runtime.forwardedGalleryContext;
       return runtime.generateHyperframe({
         prompt: args.prompt,
         durationSec: args.durationSec ?? runtime.forwardedDurationSec,
         projectId: args.projectId || runtime.forwardedProjectId,
         title: args.title,
+        selectedGalleryContext: selectedGalleryContext
+          ? normalizeSelectedGalleryPromptContext(selectedGalleryContext)
+          : undefined,
+      });
+    }),
+    materializeHyperframeComponentsTool.server(async (args, execution) => {
+      const runtime = requireRuntimeContext(execution?.context as PromptAgentToolContext | undefined);
+      const parsed = materializeHyperframeComponentsToolInputSchema.parse(args);
+      const projectId = parsed.projectId || runtime.forwardedProjectId;
+      if (!projectId) throw new Error("materialize_hyperframe_components requires an active project");
+      if (!runtime.materializeHyperframeComponents) {
+        throw new Error("component materialization is not available in this runtime");
+      }
+      return runtime.materializeHyperframeComponents({
+        projectId,
+        placements: parsed.placements,
       });
     }),
     startHyperframesWorkflowTool.server(async (args, execution) => {

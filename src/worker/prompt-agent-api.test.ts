@@ -61,6 +61,10 @@ vi.mock("../lib/auth-context", async () => {
 });
 
 import { AuthRequiredError } from "../lib/auth-context";
+import {
+  createSelectedComponentItem,
+  listGalleryComponents,
+} from "../lib/hyperframe-gallery-catalog";
 import { handleWorkerApi, type WorkerEnv } from "./render-api";
 
 const memberContext = {
@@ -244,5 +248,42 @@ describe("prompt agent worker route", () => {
       ]),
     );
     expect(apiMocks.toServerSentEventsResponse).toHaveBeenCalled();
+  });
+
+  it("describes selected materializable components as trusted installable inputs", async () => {
+    const appShowcase = listGalleryComponents().find((component) => component.id === "app-showcase")!;
+    apiMocks.requireAuthContext.mockResolvedValue(memberContext);
+    apiMocks.chatParamsFromRequest.mockResolvedValue({
+      messages: [{ role: "user", content: "Use this as the opener" }],
+      threadId: "thread-2",
+      runId: "run-2",
+      tools: [],
+      forwardedProps: {
+        currentPrompt: "Use the selected component as the opener.",
+        selectedGalleryContext: {
+          examples: [],
+          components: [createSelectedComponentItem(appShowcase)],
+        },
+      },
+      state: null,
+      context: [],
+      aguiContext: [],
+    });
+
+    const response = await handleWorkerApi(
+      agentRequest(),
+      {
+        ENABLE_AI_GEN: "true",
+        OPENROUTER_API_KEY: "test-key",
+        OPENROUTER_MODEL: "openrouter/test",
+      } as WorkerEnv,
+    );
+
+    expect(response?.status).toBe(200);
+    const systemPrompt = apiMocks.chat.mock.calls[0][0].systemPrompts[0];
+    expect(systemPrompt).toContain("trusted component id app-showcase");
+    expect(systemPrompt).toContain("materialize_hyperframe_components");
+    expect(systemPrompt).toContain('data-composition-src="compositions/app-showcase.html"');
+    expect(systemPrompt).toContain("Do not recreate this component's internal HTML");
   });
 });
