@@ -1,309 +1,144 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useForm, useStore } from "@tanstack/react-form";
-import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
-  Bot,
-  Download,
-  Film,
-  Info,
+  Check,
+  ChevronDown,
+  Layers3,
   Loader2,
-  Play,
-  RotateCcw,
+  Search,
+  Send,
   Sparkles,
   X,
 } from "lucide-react";
 
 import { AppHeader } from "@/components/app-header";
-import {
-  buildPromptContextFromIds,
-  HyperframeGalleryWorkspace,
-  type GalleryTab,
-  type WorkspaceSurface,
-} from "@/components/hyperframe-gallery-workspace";
-import { PromptAgentPanel } from "@/components/prompt-agent-panel";
+import { buildPromptContextFromIds } from "@/components/hyperframe-gallery-workspace";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { messageFromError } from "@/lib/api-client";
 import {
-  invalidateProjectCaches,
   useConfigQuery,
-  useGenerateHyperframeMutation,
   useMeQuery,
-  useRenderMutation,
+  useStartWebsiteToVideoWorkflowMutation,
 } from "@/lib/app-queries";
+import { fieldError, formSubmitHandler } from "@/lib/form-utils";
 import {
-  DEFAULT_CREATION_MODE,
   DEFAULT_DURATION_SEC,
-  DEFAULT_RENDER_FORMAT,
-  DEFAULT_RENDER_RESOLUTION_ID,
-  EXPORT_RESOLUTION_PRESETS,
-  getExportResolutionPreset,
+  DURATION_PRESETS,
   normalizeDurationSec,
-  readStoredCreationMode,
-  renderFormatLabel,
-  RENDER_FORMATS,
-  resolveCreationMode,
-  resolveCreationTab,
-  writeStoredCreationMode,
-  type CreationMode,
-  type CreationTab,
-  type ExportResolutionId,
-  type RenderFormat,
 } from "@/lib/main-page-creation-flow";
-import { creationIntakeFormSchema, type CreationIntakeFormValues } from "@/lib/form-schemas";
-import { fieldError } from "@/lib/form-utils";
 import {
-  MAIN_PAGE_CREATE_ASIDE_CLASS,
-  MAIN_PAGE_CREATE_CARD_CLASS,
-  MAIN_PAGE_CREATE_CARD_CONTENT_CLASS,
-  MAIN_PAGE_GRID_CLASS,
-  SELECTED_CONTEXT_BOX_CLASS,
-  SELECTED_CONTEXT_CHIP_CLASS,
-} from "@/lib/main-page-layout";
-import {
-  appendGalleryPromptText,
   countSelectedGalleryItems,
-  GALLERY_COMPONENT_SELECTION_LIMIT,
-  GALLERY_EXAMPLE_SELECTION_LIMIT,
+  filterGalleryComponents,
+  listGalleryComponentCategories,
+  listGalleryComponents,
+  listGalleryExamples,
   removeGallerySelectionId,
   toggleGallerySelectionId,
+  GALLERY_COMPONENT_SELECTION_LIMIT,
+  GALLERY_EXAMPLE_SELECTION_LIMIT,
   type GalleryComponent,
   type GalleryExample,
   type SelectedGalleryPromptContext,
 } from "@/lib/hyperframe-gallery-catalog";
-import type { GenerateHyperframeOutput } from "@/lib/prompt-agent-contract";
+import { workflowIntakeFormSchema, type WorkflowIntakeFormValues } from "@/lib/form-schemas";
+import { getComponentMaterializationState } from "@/lib/hyperframe-component-registry";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({
   component: MotionFramesHome,
 });
 
-const DEFAULT_PROMPT =
-  "A 6 second kinetic product teaser for Motion Frames: crisp editorial typography, a Cloudflare orange accent, a teal render timeline, and one clean camera move.";
-
 function MotionFramesHome() {
-  const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const meQuery = useMeQuery();
   const configQuery = useConfigQuery();
-  const generateMutation = useGenerateHyperframeMutation();
-  const renderMutation = useRenderMutation();
-  const playerRef = useRef<HTMLElement | null>(null);
-  const defaultCreationValues: CreationIntakeFormValues = {
-    prompt: DEFAULT_PROMPT,
-    durationSec: DEFAULT_DURATION_SEC,
-    exportResolutionId: DEFAULT_RENDER_RESOLUTION_ID,
-    renderFormat: DEFAULT_RENDER_FORMAT,
-  };
-  const creationForm = useForm({
-    defaultValues: defaultCreationValues,
-    validators: {
-      onChange: creationIntakeFormSchema,
-      onSubmit: creationIntakeFormSchema,
-    },
-  });
-  const creationValues = useStore(creationForm.store, (state) => state.values);
-  const [, setCreationModeState] = useState<CreationMode>(
-    () => readStoredCreationMode() ?? DEFAULT_CREATION_MODE,
-  );
-  const [activeCreationTab, setActiveCreationTab] = useState<CreationTab>(
-    () => readStoredCreationMode() ?? DEFAULT_CREATION_MODE,
-  );
-  const [workspaceSurface, setWorkspaceSurface] = useState<WorkspaceSurface>("gallery");
-  const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>("examples");
-  const [activeComponentCategory, setActiveComponentCategory] = useState("All");
-  const [selectedExampleIds, setSelectedExampleIds] = useState<Array<string>>([]);
+  const startWorkflowMutation = useStartWebsiteToVideoWorkflowMutation();
+  const toast = useToast();
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<Array<string>>([]);
   const [selectedComponentIds, setSelectedComponentIds] = useState<Array<string>>([]);
   const [componentPlacementIntents, setComponentPlacementIntents] = useState<Record<string, string>>({});
-  const [generatedHtml, setGeneratedHtml] = useState("");
-  const [activeProjectId, setActiveProjectId] = useState("");
-  const [activeProjectTitle, setActiveProjectTitle] = useState("");
-  const [renderUrl, setRenderUrl] = useState("");
-  const toast = useToast();
-
-  const me = meQuery.data ?? null;
-  const aiEnabled = configQuery.data?.aiGenEnabled ?? false;
-  const modelLabel = configQuery.data?.modelLabel ?? "";
-  const isConfigReady = !configQuery.isPending;
-  const isGenerating = generateMutation.isPending;
-  const isRendering = renderMutation.isPending;
-  const activeSource = generatedHtml ? "Generated HTML" : "Bundled intro";
-  const hasGeneratedOutput = Boolean(generatedHtml || activeProjectId);
-  const canGenerate = aiEnabled && creationValues.prompt.trim().length > 0;
-  const canRender = !isRendering && !isGenerating;
-  const canUseAgentTab = isConfigReady && aiEnabled;
-  const visibleCreationTab =
-    activeCreationTab === "agent" && !canUseAgentTab
-      ? "manual"
-      : resolveCreationTab(activeCreationTab, canUseAgentTab);
-  const exportResolution = getExportResolutionPreset(creationValues.exportResolutionId);
-  const renderFormatName = renderFormatLabel(creationValues.renderFormat);
-  const renderSourceDescription = hasGeneratedOutput
-    ? "current generated HyperFrame"
-    : "bundled default composition";
+  const [componentPickerOpen, setComponentPickerOpen] = useState(false);
+  const [componentSearch, setComponentSearch] = useState("");
+  const [activeComponentCategory, setActiveComponentCategory] = useState("All");
+  const templates = useMemo(() => listGalleryExamples(), []);
+  const components = useMemo(() => listGalleryComponents(), []);
+  const categories = useMemo(() => listGalleryComponentCategories(), []);
   const selectedGalleryContext = useMemo(
     () =>
       buildPromptContextFromIds({
-        exampleIds: selectedExampleIds,
+        exampleIds: selectedTemplateIds,
         componentIds: selectedComponentIds,
         componentPlacementIntents,
       }),
-    [componentPlacementIntents, selectedComponentIds, selectedExampleIds],
+    [componentPlacementIntents, selectedComponentIds, selectedTemplateIds],
   );
-  const selectedGalleryCount = countSelectedGalleryItems(selectedGalleryContext);
+  const selectedContextCount = countSelectedGalleryItems(selectedGalleryContext);
+  const visibleComponents = useMemo(() => {
+    const categoryFiltered = filterGalleryComponents(components, activeComponentCategory);
+    const query = componentSearch.trim().toLowerCase();
+    if (!query) return categoryFiltered;
+    return categoryFiltered.filter((component) =>
+      [
+        component.name,
+        component.description,
+        component.category,
+        ...component.tags,
+      ].some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [activeComponentCategory, componentSearch, components]);
+  const workflowEnabled = configQuery.data?.websiteToVideoWorkflowEnabled ?? false;
+  const isConfigReady = !configQuery.isPending;
+
+  const intakeForm = useForm({
+    defaultValues: {
+      prompt: "",
+      durationSec: DEFAULT_DURATION_SEC,
+    } satisfies WorkflowIntakeFormValues,
+    validators: {
+      onChange: workflowIntakeFormSchema,
+      onSubmit: workflowIntakeFormSchema,
+    },
+    onSubmit: async ({ value }) => {
+      const input = workflowIntakeFormSchema.parse(value);
+      try {
+        const workflowRun = await startWorkflowMutation.mutateAsync({
+          prompt: input.prompt,
+          durationSec: input.durationSec,
+          title: titleFromPrompt(input.prompt),
+          selectedGalleryContext: selectedContextCount ? selectedGalleryContext : undefined,
+        });
+        await navigate({
+          to: "/workflows/$runId",
+          params: { runId: workflowRun.id },
+        });
+      } catch (err) {
+        toast.error(messageFromError(err));
+      }
+    },
+  });
+  const intakeValues = useStore(intakeForm.store, (state) => state.values);
+  const canSubmit =
+    workflowEnabled &&
+    isConfigReady &&
+    intakeValues.prompt.trim().length > 0 &&
+    !startWorkflowMutation.isPending;
 
   useEffect(() => {
     if (meQuery.isError) window.location.assign("/login");
   }, [meQuery.isError]);
 
-  useEffect(() => {
-    if (!isConfigReady) return;
-    setCreationModeState((current) => {
-      const next = resolveCreationMode(readStoredCreationMode() ?? current, aiEnabled);
-      setActiveCreationTab((tab) => (tab === "render" ? tab : next));
-      return next;
-    });
-  }, [aiEnabled, isConfigReady]);
-
-  useEffect(() => {
-    if (customElements.get("hyperframes-player")) return;
-    const script = document.createElement("script");
-    script.src = "/_hyperframes/player.js";
-    script.async = true;
-    document.head.appendChild(script);
-  }, []);
-
-  useEffect(() => {
-    const player = playerRef.current;
-    if (!player) return;
-
-    if (generatedHtml) {
-      player.removeAttribute("src");
-      player.setAttribute("srcdoc", generatedHtml);
-      return;
-    }
-
-    player.removeAttribute("srcdoc");
-    player.setAttribute("src", "/api/preview");
-  }, [generatedHtml, workspaceSurface]);
-
-  function selectCreationTab(tab: CreationTab) {
-    if (tab === "agent" && !canUseAgentTab) return;
-    setActiveCreationTab(tab);
-    if (tab === "render") return;
-    setCreationModeState(tab);
-    writeStoredCreationMode(tab);
-  }
-
-  const setPrompt = useCallback(
-    (value: string | ((current: string) => string)) => {
-      const current = creationForm.state.values.prompt;
-      creationForm.setFieldValue("prompt", typeof value === "function" ? value(current) : value);
-    },
-    [creationForm],
-  );
-
-  const setDurationSec = useCallback(
-    (value: unknown) => {
-      creationForm.setFieldValue("durationSec", normalizeDurationSec(value));
-    },
-    [creationForm],
-  );
-
-  async function generate() {
-    if (!canGenerate) return;
-    setRenderUrl("");
-    toast.info("Generating composition...");
-
-    try {
-      const values = creationIntakeFormSchema.parse(creationForm.state.values);
-      const data = await generateMutation.mutateAsync({
-        prompt: values.prompt,
-        durationSec: values.durationSec,
-        projectId: activeProjectId || undefined,
-        selectedGalleryContext: selectedGalleryCount ? selectedGalleryContext : undefined,
-      });
-      if (!data.html) throw new Error("Generation failed");
-
-      setGeneratedHtml(data.html);
-      setWorkspaceSurface("preview");
-      if (data.project?.id) {
-        setActiveProjectId(data.project.id);
-        setActiveProjectTitle(data.project.title);
-      }
-      toast.show({
-        tone: data.lintOk ? "success" : "warning",
-        message: `Generated with ${data.model ?? "selected model"} in ${data.attempts ?? 1} attempt(s).`,
-      });
-    } catch (err) {
-      toast.error(messageFromError(err));
-    }
-  }
-
-  function applyAgentGeneration(data: GenerateHyperframeOutput) {
-    setGeneratedHtml(data.html);
-    setRenderUrl("");
-    setWorkspaceSurface("preview");
-    if (data.project?.id) {
-      setActiveProjectId(data.project.id);
-      setActiveProjectTitle(data.project.title);
-      invalidateProjectCaches(queryClient, data.project.id);
-    }
-    toast.show({
-      tone: data.lintOk ? "success" : "warning",
-      message: `Generated with ${data.model} in ${data.attempts} attempt(s).`,
-    });
-  }
-
-  async function render() {
-    if (!canRender) return;
-    setRenderUrl("");
-    toast.info(`Rendering ${renderFormatName}...`);
-
-    try {
-      const values = creationIntakeFormSchema.parse(creationForm.state.values);
-      const data = await renderMutation.mutateAsync({
-        html: generatedHtml,
-        projectId: activeProjectId,
-        resolutionId: values.exportResolutionId,
-        format: values.renderFormat,
-      });
-      if (!data.url) throw new Error("Render failed");
-
-      setRenderUrl(data.url);
-      toast.success(
-        `Rendered ${data.source ?? "composition"} as ${renderFormatName} in ${formatDuration(data.durationMs)}.`,
-      );
-    } catch (err) {
-      toast.error(messageFromError(err));
-    }
-  }
-
-  function resetComposition() {
-    setGeneratedHtml("");
-    setRenderUrl("");
-    setActiveProjectId("");
-    setActiveProjectTitle("");
-    setWorkspaceSurface("gallery");
-    toast.info("Composition reset.");
-  }
-
-  function toggleExampleSelection(example: GalleryExample) {
-    setSelectedExampleIds((current) =>
-      toggleGallerySelectionId(current, example.id, GALLERY_EXAMPLE_SELECTION_LIMIT),
+  function toggleTemplate(template: GalleryExample) {
+    setSelectedTemplateIds((current) =>
+      toggleGallerySelectionId(current, template.id, GALLERY_EXAMPLE_SELECTION_LIMIT),
     );
   }
 
-  function toggleComponentSelection(component: GalleryComponent) {
+  function toggleComponent(component: GalleryComponent) {
     setSelectedComponentIds((current) => {
       const next = toggleGallerySelectionId(current, component.id, GALLERY_COMPONENT_SELECTION_LIMIT);
       if (current.includes(component.id) && !next.includes(component.id)) {
@@ -316,18 +151,6 @@ function MotionFramesHome() {
     });
   }
 
-  function removeSelectedExample(exampleId: string) {
-    setSelectedExampleIds((current) => removeGallerySelectionId(current, exampleId));
-  }
-
-  function removeSelectedComponent(componentId: string) {
-    setSelectedComponentIds((current) => removeGallerySelectionId(current, componentId));
-    setComponentPlacementIntents((current) => {
-      const { [componentId]: _removed, ...rest } = current;
-      return rest;
-    });
-  }
-
   function updateComponentPlacementIntent(componentId: string, placementIntent: string) {
     setComponentPlacementIntents((current) => ({
       ...current,
@@ -335,17 +158,11 @@ function MotionFramesHome() {
     }));
   }
 
-  function insertSelectedGalleryContext() {
-    if (!selectedGalleryCount) return;
-    setPrompt((current) => appendGalleryPromptText(current, selectedGalleryContext));
-    toast.success("Added selected gallery context to the prompt.");
-  }
-
-  if (!me) {
+  if (!meQuery.data) {
     return (
       <main className="grid min-h-dvh place-items-center bg-background px-6 text-foreground">
         <div className="text-center">
-          <Film className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden="true" />
+          <Sparkles className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden="true" />
           <p className="mt-4 text-lg font-medium">Opening Motion Frames...</p>
         </div>
       </main>
@@ -353,374 +170,385 @@ function MotionFramesHome() {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col bg-background text-foreground lg:h-dvh lg:overflow-hidden">
+    <div className="flex min-h-dvh flex-col bg-background text-foreground">
       <AppHeader active="workspace" />
-      <main className={MAIN_PAGE_GRID_CLASS}>
-        <HyperframeGalleryWorkspace
-          surface={workspaceSurface}
-          onSurfaceChange={setWorkspaceSurface}
-          activeGalleryTab={activeGalleryTab}
-          onGalleryTabChange={setActiveGalleryTab}
-          activeComponentCategory={activeComponentCategory}
-          onComponentCategoryChange={setActiveComponentCategory}
-          selectedExampleIds={selectedExampleIds}
-          selectedComponentIds={selectedComponentIds}
-          onToggleExample={toggleExampleSelection}
-          onToggleComponent={toggleComponentSelection}
-          promptContext={selectedGalleryContext}
-          hasGeneratedOutput={hasGeneratedOutput}
-          activeProjectId={activeProjectId}
-          activeProjectTitle={activeProjectTitle}
-          activeSource={activeSource}
-          durationLabel={formatDurationOption(creationValues.durationSec)}
-          playerRef={playerRef}
-        />
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
+        <header className="grid gap-1">
+          <h1 className="text-2xl font-semibold leading-tight text-foreground sm:text-3xl">
+            What do you want to create?
+          </h1>
+          <p className="max-w-2xl text-sm leading-5 text-muted-foreground">
+            Start with a prompt. Add templates or components only when they help the workflow.
+          </p>
+        </header>
 
-        <aside className={MAIN_PAGE_CREATE_ASIDE_CLASS}>
-          <Card className={MAIN_PAGE_CREATE_CARD_CLASS}>
-            <CardHeader className="pb-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4" aria-hidden="true" />
-                    Create HyperFrame
-                  </CardTitle>
-                  <CardDescription>{modelLabel || "OpenRouter"}</CardDescription>
-                </div>
-                <div className="group relative">
-                  <button
-                    type="button"
-                    aria-describedby="prompting-guidance"
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-hairline bg-background text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/15"
-                  >
-                    <Info className="h-4 w-4" aria-hidden="true" />
-                    <span className="sr-only">Prompting guidance</span>
-                  </button>
-                  <div
-                    id="prompting-guidance"
-                    role="tooltip"
-                    className="pointer-events-none absolute right-0 top-11 z-20 hidden w-[min(22rem,calc(100vw-2rem))] rounded-md border border-hairline bg-white p-3 text-sm text-body shadow-lg group-hover:block group-focus-within:block"
-                  >
-                    Include the subject, mood, pacing, brand cues, camera movement, duration, and final beat. Strong prompts describe build, breathe, and resolve moments.
-                  </div>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className={MAIN_PAGE_CREATE_CARD_CONTENT_CLASS}>
-              <div
-                role="tablist"
-                aria-label="Creation mode"
-                className="grid grid-cols-3 gap-1 rounded-md bg-surface-card p-1"
-              >
-                <button
+        <section
+          aria-label="Workflow intake"
+          className="rounded-lg border border-hairline bg-background shadow-sm"
+        >
+          <form onSubmit={formSubmitHandler(() => intakeForm.handleSubmit())}>
+            <div className="grid gap-3 p-3">
+              <intakeForm.Field name="prompt">
+                {(field) => {
+                  const error = fieldError(field.state.meta);
+                  return (
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="workflow-prompt" className="sr-only">
+                        Workflow prompt
+                      </Label>
+                      <Textarea
+                        id="workflow-prompt"
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                        placeholder="Describe the HyperFrame you want to make..."
+                        rows={4}
+                        className="min-h-28 border-hairline bg-surface-soft text-sm"
+                        aria-invalid={Boolean(error)}
+                        disabled={startWorkflowMutation.isPending}
+                      />
+                      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+                    </div>
+                  );
+                }}
+              </intakeForm.Field>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
                   type="button"
-                  role="tab"
-                  aria-selected={visibleCreationTab === "agent"}
-                  disabled={!canUseAgentTab}
-                  onClick={() => selectCreationTab("agent")}
-                  className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                    visibleCreationTab === "agent"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setComponentPickerOpen((current) => !current)}
+                  aria-expanded={componentPickerOpen}
+                  aria-controls="component-picker"
                 >
-                  <Bot className="h-4 w-4" aria-hidden="true" />
-                  AI Agent
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={visibleCreationTab === "manual"}
-                  onClick={() => selectCreationTab("manual")}
-                  className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold transition-colors ${
-                    visibleCreationTab === "manual"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <Sparkles className="h-4 w-4" aria-hidden="true" />
-                  Manual Prompt
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={visibleCreationTab === "render"}
-                  onClick={() => selectCreationTab("render")}
-                  className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold transition-colors ${
-                    visibleCreationTab === "render"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <Play className="h-4 w-4" aria-hidden="true" />
-                  Render
-                </button>
-              </div>
+                  <Layers3 className="h-4 w-4" aria-hidden="true" />
+                  Components
+                  {selectedGalleryContext.components.length ? (
+                    <Badge variant="outline" className="h-5 px-2">
+                      {selectedGalleryContext.components.length}
+                    </Badge>
+                  ) : null}
+                  <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                </Button>
 
-              <SelectedGalleryContextChips
-                context={selectedGalleryContext}
-                disabled={isGenerating || isRendering}
-                onRemoveExample={removeSelectedExample}
-                onRemoveComponent={removeSelectedComponent}
-                onUpdateComponentPlacementIntent={updateComponentPlacementIntent}
-              />
-
-              {visibleCreationTab === "agent" ? (
-                <PromptAgentPanel
-                  prompt={creationValues.prompt}
-                  onPromptChange={setPrompt}
-                  durationSec={creationValues.durationSec}
-                  onDurationChange={setDurationSec}
-                  aiEnabled={aiEnabled}
-                  isConfigReady={isConfigReady}
-                  modelLabel={modelLabel}
-                  voiceInputEnabled={configQuery.data?.voiceInputEnabled ?? false}
-                  transcriptionProviderLabel={configQuery.data?.transcriptionProviderLabel ?? null}
-                  activeProjectId={activeProjectId}
-                  activeProjectTitle={activeProjectTitle}
-                  selectedGalleryContext={selectedGalleryContext}
-                  isGenerating={isGenerating}
-                  isRendering={isRendering}
-                  onGenerated={applyAgentGeneration}
-                />
-              ) : null}
-
-              {visibleCreationTab === "manual" ? (
-                <div className="space-y-4">
-                  {selectedGalleryCount ? (
-                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-hairline bg-surface-card px-3 py-2 text-sm text-muted-foreground">
-                      <span>{selectedGalleryCount} gallery item{selectedGalleryCount === 1 ? "" : "s"} selected</span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        onClick={insertSelectedGalleryContext}
-                        disabled={isGenerating || isRendering}
+                <intakeForm.Field name="durationSec">
+                  {(field) => (
+                    <label className="inline-flex h-9 items-center gap-2 rounded-md border border-hairline bg-background px-3 text-xs font-medium text-muted-foreground">
+                      Duration
+                      <select
+                        aria-label="Duration"
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(event) => field.handleChange(normalizeDurationSec(event.target.value))}
+                        className="bg-transparent text-xs font-semibold text-foreground outline-none"
+                        disabled={startWorkflowMutation.isPending}
                       >
-                        Add to prompt
-                      </Button>
-                    </div>
-                  ) : null}
-                  <div className="space-y-2">
-                    <Label htmlFor="prompt">Final generation prompt</Label>
-                    <creationForm.Field name="prompt">
-                      {(field) => {
-                        const error = fieldError(field.state.meta);
-                        return (
-                          <>
-                            <Textarea
-                              id="prompt"
-                              value={field.state.value}
-                              onBlur={field.handleBlur}
-                              onChange={(event) => field.handleChange(event.target.value)}
-                              rows={9}
-                              disabled={!isConfigReady || isGenerating || isRendering}
-                              aria-invalid={Boolean(error)}
-                            />
-                            {error ? <p className="text-sm text-destructive">{error}</p> : null}
-                          </>
-                        );
-                      }}
-                    </creationForm.Field>
-                  </div>
+                        {DURATION_PRESETS.map((seconds) => (
+                          <option key={seconds} value={seconds}>
+                            {formatDuration(seconds)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </intakeForm.Field>
 
-                  <Button
-                    type="button"
-                    className="w-full"
-                    onClick={generate}
-                    disabled={!canGenerate || isGenerating || isRendering}
-                  >
-                    {isGenerating ? (
-                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    ) : (
-                      <Sparkles className="h-4 w-4" aria-hidden="true" />
-                    )}
-                    Generate Preview
-                  </Button>
-                </div>
-              ) : null}
+                {selectedContextCount ? (
+                  <Badge variant="secondary" className="h-8 px-3">
+                    {selectedContextCount} context item{selectedContextCount === 1 ? "" : "s"}
+                  </Badge>
+                ) : null}
 
-              {visibleCreationTab === "render" ? (
-                <div className="space-y-4">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="export-resolution">Resolution</Label>
-                      <creationForm.Field name="exportResolutionId">
-                        {(field) => (
-                          <select
-                            id="export-resolution"
-                            value={field.state.value}
-                            onBlur={field.handleBlur}
-                            onChange={(event) => field.handleChange(event.target.value as ExportResolutionId)}
-                            disabled={isRendering}
-                            className="h-10 w-full rounded-md border border-input bg-background px-3.5 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {EXPORT_RESOLUTION_PRESETS.map((preset) => (
-                              <option key={preset.id} value={preset.id}>
-                                {preset.label}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </creationForm.Field>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="export-format">Format</Label>
-                      <creationForm.Field name="renderFormat">
-                        {(field) => (
-                          <select
-                            id="export-format"
-                            value={field.state.value}
-                            onBlur={field.handleBlur}
-                            onChange={(event) => field.handleChange(event.target.value as RenderFormat)}
-                            disabled={isRendering}
-                            className="h-10 w-full rounded-md border border-input bg-background px-3.5 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {RENDER_FORMATS.map((format) => (
-                              <option key={format.value} value={format.value}>
-                                {format.label}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </creationForm.Field>
-                    </div>
-                  </div>
-                  <div className="rounded-md bg-surface-card px-3 py-2 text-sm text-muted-foreground">
-                    Render exports the {renderSourceDescription} at {exportResolution.width} x {exportResolution.height} as {renderFormatName}. The timeline remains {formatDurationOption(creationValues.durationSec)}.
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <Button
-                      type="button"
-                      className="w-full"
-                      variant="default"
-                      onClick={render}
-                      disabled={!canRender}
-                    >
-                      {isRendering ? (
-                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                      ) : (
-                        <Play className="h-4 w-4" aria-hidden="true" />
-                      )}
-                      Render {renderFormatName}
-                    </Button>
-                    <Button
-                      type="button"
-                      className="w-full"
-                      variant="outline"
-                      onClick={resetComposition}
-                      disabled={!generatedHtml || isRendering}
-                    >
-                      <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                      Reset
-                    </Button>
-                  </div>
-                  {renderUrl ? (
-                    <Button asChild className="w-full" variant="secondary">
-                      <a href={renderUrl} target="_blank" rel="noreferrer">
-                        <Download className="h-4 w-4" aria-hidden="true" />
-                        Download {renderFormatName}
-                      </a>
-                    </Button>
-                  ) : null}
-                  <div className="rounded-md border border-hairline bg-surface-card px-3 py-2 text-xs text-muted-foreground">
-                    Selected export: {exportResolution.width} x {exportResolution.height} {renderFormatName}
-                  </div>
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
+                <Button
+                  type="submit"
+                  className="ml-auto h-9 px-4"
+                  disabled={!canSubmit}
+                  aria-disabled={!canSubmit}
+                >
+                  {startWorkflowMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Send className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  Send
+                </Button>
+              </div>
+            </div>
 
-        </aside>
+            {workflowEnabled ? null : (
+              <div className="border-t border-hairline bg-surface-card px-3 py-2 text-xs text-muted-foreground">
+                Workflow intake is unavailable until the website-to-video workflow is enabled.
+              </div>
+            )}
+          </form>
+
+          {selectedContextCount ? (
+            <SelectedContextSummary
+              context={selectedGalleryContext}
+              disabled={startWorkflowMutation.isPending}
+              onRemoveTemplate={(templateId) =>
+                setSelectedTemplateIds((current) => removeGallerySelectionId(current, templateId))
+              }
+              onRemoveComponent={(componentId) => {
+                setSelectedComponentIds((current) => removeGallerySelectionId(current, componentId));
+                setComponentPlacementIntents((current) => {
+                  const { [componentId]: _removed, ...rest } = current;
+                  return rest;
+                });
+              }}
+              onUpdateComponentPlacementIntent={updateComponentPlacementIntent}
+            />
+          ) : null}
+
+          {componentPickerOpen ? (
+            <ComponentPicker
+              components={visibleComponents}
+              categories={categories}
+              activeCategory={activeComponentCategory}
+              search={componentSearch}
+              selectedComponentIds={selectedComponentIds}
+              onSearchChange={setComponentSearch}
+              onCategoryChange={setActiveComponentCategory}
+              onToggleComponent={toggleComponent}
+              onClose={() => setComponentPickerOpen(false)}
+            />
+          ) : null}
+        </section>
+
+        <TemplateRail
+          templates={templates}
+          selectedTemplateIds={selectedTemplateIds}
+          onToggleTemplate={toggleTemplate}
+        />
       </main>
     </div>
   );
 }
 
-function SelectedGalleryContextChips({
+function TemplateRail({
+  templates,
+  selectedTemplateIds,
+  onToggleTemplate,
+}: {
+  templates: Array<GalleryExample>;
+  selectedTemplateIds: ReadonlyArray<string>;
+  onToggleTemplate: (template: GalleryExample) => void;
+}) {
+  return (
+    <section aria-label="Templates" className="min-w-0">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-foreground">Start with a template</h2>
+        <span className="text-xs text-muted-foreground">{templates.length} available</span>
+      </div>
+      <div className="flex gap-3 overflow-x-auto pb-2">
+        {templates.map((template) => {
+          const selected = selectedTemplateIds.includes(template.id);
+          return (
+            <button
+              key={template.id}
+              type="button"
+              onClick={() => onToggleTemplate(template)}
+              aria-pressed={selected}
+              className={cn(
+                "group grid min-w-52 max-w-52 overflow-hidden rounded-lg border bg-background text-left transition-colors",
+                selected ? "border-foreground" : "border-hairline hover:border-foreground/50",
+              )}
+            >
+              <GalleryMedia media={template.previewMedia} />
+              <span className="grid gap-1 p-2.5">
+                <span className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-semibold text-foreground">
+                    {template.title}
+                  </span>
+                  {selected ? <Check className="h-4 w-4 shrink-0" aria-hidden="true" /> : null}
+                </span>
+                <span className="line-clamp-2 text-xs leading-4 text-muted-foreground">
+                  {template.description}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ComponentPicker({
+  components,
+  categories,
+  activeCategory,
+  search,
+  selectedComponentIds,
+  onSearchChange,
+  onCategoryChange,
+  onToggleComponent,
+  onClose,
+}: {
+  components: Array<GalleryComponent>;
+  categories: Array<{ category: string; count: number }>;
+  activeCategory: string;
+  search: string;
+  selectedComponentIds: ReadonlyArray<string>;
+  onSearchChange: (value: string) => void;
+  onCategoryChange: (category: string) => void;
+  onToggleComponent: (component: GalleryComponent) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      id="component-picker"
+      className="border-t border-hairline bg-surface-card p-3"
+    >
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="relative min-w-60 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <input
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Search components"
+            className="h-9 w-full rounded-md border border-hairline bg-background pl-9 pr-3 text-sm outline-none focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15"
+          />
+        </div>
+        <Button type="button" variant="ghost" size="icon" aria-label="Close components" onClick={onClose}>
+          <X className="h-4 w-4" aria-hidden="true" />
+        </Button>
+      </div>
+      <div className="mb-3 flex gap-1 overflow-x-auto pb-1">
+        <FilterButton active={activeCategory === "All"} onClick={() => onCategoryChange("All")}>
+          All
+        </FilterButton>
+        {categories.map((item) => (
+          <FilterButton
+            key={item.category}
+            active={activeCategory === item.category}
+            onClick={() => onCategoryChange(item.category)}
+          >
+            {item.category}
+          </FilterButton>
+        ))}
+      </div>
+      <div className="grid max-h-[22rem] grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
+        {components.map((component) => {
+          const selected = selectedComponentIds.includes(component.id);
+          const materialization = getComponentMaterializationState(component);
+          return (
+            <button
+              key={component.id}
+              type="button"
+              onClick={() => onToggleComponent(component)}
+              aria-pressed={selected}
+              className={cn(
+                "grid overflow-hidden rounded-lg border bg-background text-left transition-colors",
+                selected ? "border-foreground" : "border-hairline hover:border-foreground/50",
+              )}
+            >
+              <GalleryMedia media={component.previewMedia} compact />
+              <span className="grid gap-1 p-2.5">
+                <span className="flex min-w-0 items-center justify-between gap-2">
+                  <span className="truncate text-sm font-semibold text-foreground">
+                    {component.name}
+                  </span>
+                  {selected ? <Check className="h-4 w-4 shrink-0" aria-hidden="true" /> : null}
+                </span>
+                <span className="line-clamp-2 text-xs leading-4 text-muted-foreground">
+                  {component.description}
+                </span>
+                <span className="mt-1 flex flex-wrap gap-1">
+                  <Badge variant="outline">{component.category}</Badge>
+                  <Badge variant={materialization.state === "materializable" ? "secondary" : "outline"}>
+                    {materialization.state === "materializable" ? "Installable" : "Prompt"}
+                  </Badge>
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FilterButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "h-8 shrink-0 rounded-full border px-3 text-xs font-semibold transition-colors",
+        active
+          ? "border-foreground bg-foreground text-primary-foreground"
+          : "border-hairline bg-background text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SelectedContextSummary({
   context,
   disabled,
-  onRemoveExample,
+  onRemoveTemplate,
   onRemoveComponent,
   onUpdateComponentPlacementIntent,
 }: {
   context: SelectedGalleryPromptContext;
   disabled: boolean;
-  onRemoveExample: (exampleId: string) => void;
+  onRemoveTemplate: (templateId: string) => void;
   onRemoveComponent: (componentId: string) => void;
   onUpdateComponentPlacementIntent: (componentId: string, placementIntent: string) => void;
 }) {
-  const items = [
-    ...context.examples.map((item) => ({
-      ...item,
-      label: "Example",
-      stateLabel: "Prompt reference",
-      onRemove: () => onRemoveExample(item.id),
-    })),
-    ...context.components.map((item) => ({
-      ...item,
-      label: "Component",
-      stateLabel: item.materialization.state === "materializable" ? "Installable block" : "Prompt reference",
-      onRemove: () => onRemoveComponent(item.id),
-    })),
-  ];
-  const materializableComponents = context.components.filter(
-    (item) => item.materialization.state === "materializable",
-  );
-
-  if (!items.length) return null;
-
   return (
-    <div
-      aria-label="Selected gallery prompt context"
-      className={SELECTED_CONTEXT_BOX_CLASS}
-    >
-      <div className="mb-2 text-xs font-medium uppercase tracking-normal text-emerald-800">
+    <div className="border-t border-hairline bg-background px-3 py-2">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-normal text-muted-foreground">
         Selected context
       </div>
       <div className="flex flex-wrap gap-2">
-        {items.map((item) => (
-          <span
-            key={`${item.kind}-${item.id}`}
-            className={SELECTED_CONTEXT_CHIP_CLASS}
-          >
-            <span className="shrink-0 text-xs text-emerald-700">{item.label}</span>
-            <span className="min-w-0 truncate">{item.name}</span>
-            <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[0.68rem] font-semibold text-emerald-800">
-              {item.stateLabel}
-            </span>
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={item.onRemove}
-              aria-label={`Remove ${item.name} from selected gallery context`}
-              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-emerald-700 transition-colors hover:bg-emerald-100 hover:text-emerald-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <X className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          </span>
+        {context.examples.map((template) => (
+          <ContextChip
+            key={`template-${template.id}`}
+            label="Template"
+            name={template.name}
+            disabled={disabled}
+            onRemove={() => onRemoveTemplate(template.id)}
+          />
+        ))}
+        {context.components.map((component) => (
+          <ContextChip
+            key={`component-${component.id}`}
+            label={component.materialization.state === "materializable" ? "Installable" : "Component"}
+            name={component.name}
+            disabled={disabled}
+            onRemove={() => onRemoveComponent(component.id)}
+          />
         ))}
       </div>
-      {materializableComponents.length ? (
-        <div className="mt-3 space-y-2">
-          {materializableComponents.map((item) => {
-            const { materialization } = item;
-            if (materialization.state !== "materializable") return null;
+      {context.components.some((component) => component.materialization.state === "materializable") ? (
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {context.components.map((component) => {
+            if (component.materialization.state !== "materializable") return null;
             return (
-              <div key={item.id} className="space-y-1">
-                <Label htmlFor={`placement-${item.id}`} className="text-xs text-emerald-900">
-                  {item.name} placement
-                </Label>
+              <label key={component.id} className="grid gap-1 text-xs font-medium text-muted-foreground">
+                {component.name} placement
                 <Textarea
-                  id={`placement-${item.id}`}
-                  value={materialization.placementIntent ?? ""}
-                  onChange={(event) => onUpdateComponentPlacementIntent(item.id, event.target.value)}
-                  placeholder="Opening scene, product demo beat, final CTA..."
+                  value={component.materialization.placementIntent ?? ""}
+                  onChange={(event) => onUpdateComponentPlacementIntent(component.id, event.target.value)}
                   rows={2}
+                  placeholder="Opening scene, final CTA, product demo beat..."
                   disabled={disabled}
-                  className="min-h-16 border-emerald-200 bg-white/80 text-sm focus-visible:border-emerald-500"
+                  className="min-h-16 text-sm"
                 />
-              </div>
+              </label>
             );
           })}
         </div>
@@ -729,13 +557,69 @@ function SelectedGalleryContextChips({
   );
 }
 
-function formatDuration(durationMs: number | undefined): string {
-  if (typeof durationMs !== "number") return "a moment";
-  return `${Math.max(1, Math.round(durationMs / 1000))}s`;
+function ContextChip({
+  label,
+  name,
+  disabled,
+  onRemove,
+}: {
+  label: string;
+  name: string;
+  disabled: boolean;
+  onRemove: () => void;
+}) {
+  return (
+    <span className="inline-flex max-w-full items-center gap-2 rounded-full border border-hairline bg-surface-card px-3 py-1 text-xs text-foreground">
+      <span className="font-semibold text-muted-foreground">{label}</span>
+      <span className="max-w-52 truncate">{name}</span>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onRemove}
+        className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-50"
+        aria-label={`Remove ${name}`}
+      >
+        <X className="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
+    </span>
+  );
 }
 
-function formatDurationOption(seconds: number): string {
-  if (seconds < 60) return `${seconds} seconds`;
-  const minutes = seconds / 60;
-  return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+function GalleryMedia({
+  media,
+  compact = false,
+}: {
+  media: GalleryExample["previewMedia"] | GalleryComponent["previewMedia"];
+  compact?: boolean;
+}) {
+  const className = cn(
+    "w-full bg-black object-cover",
+    compact ? "aspect-[16/7]" : "aspect-video",
+  );
+  if (media.type === "video") {
+    return (
+      <video
+        className={className}
+        src={media.src}
+        poster={media.poster}
+        muted
+        loop
+        playsInline
+        autoPlay
+        preload="metadata"
+        aria-label={media.alt}
+      />
+    );
+  }
+  return <img className={className} src={media.src} alt={media.alt} loading="lazy" />;
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  return `${seconds / 60}m`;
+}
+
+function titleFromPrompt(prompt: string): string {
+  const words = prompt.trim().replace(/\s+/g, " ").split(" ").slice(0, 8).join(" ");
+  return words || "New HyperFrame workflow";
 }

@@ -8,6 +8,7 @@ import {
 
 describe("workflow run lifecycle helpers", () => {
   it("identifies active workflow statuses for quota enforcement", () => {
+    expect(isActiveWorkflowStatus("intake")).toBe(true);
     expect(isActiveWorkflowStatus("queued")).toBe(true);
     expect(isActiveWorkflowStatus("running")).toBe(true);
     expect(isActiveWorkflowStatus("awaiting_approval")).toBe(true);
@@ -17,6 +18,8 @@ describe("workflow run lifecycle helpers", () => {
   });
 
   it("enforces valid workflow status transitions", () => {
+    expect(() => assertWorkflowTransition("intake", "queued")).not.toThrow();
+    expect(() => assertWorkflowTransition("intake", "cancelled")).not.toThrow();
     expect(() => assertWorkflowTransition("queued", "running")).not.toThrow();
     expect(() => assertWorkflowTransition("running", "succeeded")).not.toThrow();
     expect(() => assertWorkflowTransition("running", "failed")).not.toThrow();
@@ -58,5 +61,43 @@ describe("workflow run lifecycle helpers", () => {
       skippedSteps: [{ id: "voice" }],
     });
     expect("organizationId" in client).toBe(false);
+  });
+
+  it("serializes intake workflow runs with stored options", () => {
+    const client = workflowRunToClient({
+      id: "run-intake",
+      organizationId: "org-1",
+      userId: "user-1",
+      projectId: null,
+      skillId: "website-to-video",
+      status: "intake",
+      phase: "preflight",
+      inputUrl: "",
+      options: {
+        intake: {
+          source: "main-page-chat",
+          prompt: "Make a compact launch video",
+          durationSec: 8,
+        },
+      },
+      progress: { current: 0, total: 6, label: "Ready for brief" },
+      artifactManifest: null,
+      error: null,
+      createdAt: new Date("2026-06-29T12:00:00Z"),
+      updatedAt: new Date("2026-06-29T12:01:00Z"),
+      startedAt: null,
+      completedAt: null,
+    });
+
+    expect(client).toMatchObject({
+      id: "run-intake",
+      status: "intake",
+      inputUrl: "",
+      options: {
+        intake: {
+          prompt: "Make a compact launch video",
+        },
+      },
+    });
   });
 });

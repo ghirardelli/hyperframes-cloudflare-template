@@ -82,3 +82,12 @@ export type CreationIntakeFormValues = z.input<typeof creationIntakeFormSchema> 
 };
 
 export type ParsedCreationIntake = z.output<typeof creationIntakeFormSchema>;
+
+export const workflowIntakeFormSchema = z.object({
+  prompt: z.string().trim().min(1, "Enter a prompt.").max(8_000, "Prompt is too long."),
+  durationSec: z.number().min(MIN_DURATION_SEC).max(MAX_DURATION_SEC).transform((value) =>
+    normalizeDurationSec(value),
+  ),
+});
+
+export type WorkflowIntakeFormValues = z.input<typeof workflowIntakeFormSchema>;

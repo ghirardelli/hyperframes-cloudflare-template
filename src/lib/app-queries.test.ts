@@ -12,6 +12,7 @@ import { queryKeys } from "./query-keys";
 
 describe("isWorkflowPollingStatus", () => {
   it("polls only while workflow runs are active", () => {
+    expect(isWorkflowPollingStatus("intake")).toBe(true);
     expect(isWorkflowPollingStatus("queued")).toBe(true);
     expect(isWorkflowPollingStatus("running")).toBe(true);
     expect(isWorkflowPollingStatus("awaiting_approval")).toBe(true);

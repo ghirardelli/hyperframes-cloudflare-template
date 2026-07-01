@@ -63,6 +63,13 @@ import {
   type WizardStagePlan,
   type WizardStageValidationResult,
 } from "../lib/pipeline-wizard";
+import {
+  buildWorkflowRunOptions,
+  extractFirstHttpUrl,
+  getWorkflowIntakePayload,
+  normalizeWorkflowRunOptions,
+  workflowIntakePayloadSchema,
+} from "../lib/workflow-intake";
 import { upsertProjectFile } from "./studio-files-api";
 import type { WorkflowContainer } from "../container";
 import type { WorkerEnv } from "./render-api";
@@ -70,10 +77,17 @@ import type { WorkerEnv } from "./render-api";
 export type WorkflowExecutionContext = Pick<ExecutionContext, "waitUntil">;
 
 const startWorkflowSchema = z.object({
-  url: z.string().trim().min(1).max(2_000),
+  url: z.string().trim().min(1).max(2_000).optional(),
+  prompt: z.string().trim().min(1).max(8_000).optional(),
   title: z.string().trim().min(1).max(160).optional(),
   projectId: z.string().trim().min(1).max(200).optional(),
   durationSec: z.number().min(1).max(300).optional(),
+  selectedGalleryContext: workflowIntakePayloadSchema.shape.selectedGalleryContext.optional(),
+}).refine((value) => Boolean(value.url || value.prompt), {
+  message: "workflow start requires a URL or prompt",
+});
+const saveWorkflowIntakeBodySchema = workflowIntakePayloadSchema.extend({
+  sourceUrl: z.string().trim().max(2_000).optional(),
 });
 
 export type StartWebsiteToVideoWorkflowInput = z.infer<typeof startWorkflowSchema>;
@@ -161,6 +175,21 @@ export async function handleWorkflowApi(
     }
   }
 
+  const intakeMatch = pathname.match(/^\/api\/workflows\/([^/]+)\/intake$/);
+  if (intakeMatch && req.method === "PATCH") {
+    try {
+      const workflowRun = await saveWorkflowRunIntake(
+        env,
+        auth,
+        decodeURIComponent(intakeMatch[1]),
+        await req.json().catch(() => ({})),
+      );
+      return Response.json({ workflowRun });
+    } catch (err) {
+      return workflowErrorResponse(err);
+    }
+  }
+
   const continueMatch = pathname.match(/^\/api\/workflows\/([^/]+)\/continue$/);
   if (continueMatch && req.method === "POST") {
     try {
@@ -194,8 +223,13 @@ export async function startWebsiteToVideoWorkflowRun(
     throw new WorkflowApiError("website-to-video workflow runner is disabled", 403);
   }
 
-  const safeUrl = validateWorkflowUrl(input.url);
-  if (!safeUrl.ok) throw new WorkflowApiError(safeUrl.reason, 400);
+  const intakePrompt = input.prompt?.trim();
+  const candidateUrl = input.url?.trim() || (intakePrompt ? extractFirstHttpUrl(intakePrompt) ?? undefined : undefined);
+  const safeUrl = candidateUrl ? validateWorkflowUrl(candidateUrl) : null;
+  if (input.url && safeUrl && !safeUrl.ok) throw new WorkflowApiError(safeUrl.reason, 400);
+  if (input.projectId) {
+    await requireProjectAccess(auth, input.projectId, env, "read");
+  }
 
   const db = createDb(env);
   const activeRows = await db
@@ -204,7 +238,7 @@ export async function startWebsiteToVideoWorkflowRun(
     .where(
       and(
         eq(workflowRuns.organizationId, auth.organization.id),
-        inArray(workflowRuns.status, ["queued", "running", "awaiting_approval"]),
+        inArray(workflowRuns.status, ["intake", "queued", "running", "awaiting_approval"]),
       ),
     )
     .limit(DEFAULT_WORKFLOW_LIMITS.maxConcurrentRunsPerOrg);
@@ -214,22 +248,30 @@ export async function startWebsiteToVideoWorkflowRun(
 
   const now = new Date();
   const runId = crypto.randomUUID();
+  const inputUrl = safeUrl?.ok ? safeUrl.url : "";
+  const isIntakeRun = Boolean(intakePrompt);
+  const options = buildWorkflowRunOptions({
+    prompt: intakePrompt,
+    sourceUrl: inputUrl || undefined,
+    durationSec: input.durationSec,
+    title: input.title,
+    projectId: input.projectId,
+    selectedGalleryContext: input.selectedGalleryContext,
+  });
   const runValues = {
     id: runId,
     organizationId: auth.organization.id,
     userId: auth.user.id,
     projectId: input.projectId ?? null,
     skillId: WEBSITE_TO_VIDEO_SKILL_ID,
-    status: "queued" as const,
+    status: isIntakeRun ? "intake" as const : "queued" as const,
     phase: "preflight" as const,
-    inputUrl: safeUrl.url,
+    inputUrl,
     options: {
-      durationSec: input.durationSec,
-      title: input.title,
-      projectId: input.projectId,
+      ...options,
       limits: DEFAULT_WORKFLOW_LIMITS,
     },
-    progress: jsonRecord(progress(0, "Queued")),
+    progress: jsonRecord(progress(0, isIntakeRun ? "Ready for brief" : "Queued")),
     artifactManifest: jsonRecord(createWorkflowArtifactManifest({
       runId,
       skippedSteps: WEBSITE_TO_VIDEO_SKIPPED_STEPS,
@@ -242,7 +284,7 @@ export async function startWebsiteToVideoWorkflowRun(
   const rows = await db.insert(workflowRuns).values(runValues).returning();
   const run = toWorkflowRunLike(rows[0] ?? runValues);
 
-  if (ctx) {
+  if (!isIntakeRun && ctx) {
     ctx.waitUntil(runWebsiteToVideoWorkflow(env, auth, run.id).catch((err) => {
       console.error("website-to-video workflow failed", err);
     }));
@@ -260,6 +302,57 @@ export async function getWebsiteToVideoWorkflowRun(
   return workflowRunToClient(run);
 }
 
+export async function saveWorkflowRunIntake(
+  env: WorkerEnv,
+  auth: AppAuthContext,
+  runId: string,
+  rawBody: unknown,
+): Promise<WorkflowRunClient> {
+  const run = await getRunForOrg(env, auth, runId);
+  if (run.status !== "intake") {
+    throw new WorkflowApiError(`workflow intake cannot be edited from ${run.status}`, 409);
+  }
+  const body = saveWorkflowIntakeBodySchema.parse(rawBody);
+  const safeUrl = body.sourceUrl?.trim() ? validateWorkflowUrl(body.sourceUrl) : null;
+  if (safeUrl && !safeUrl.ok) throw new WorkflowApiError(safeUrl.reason, 400);
+  if (body.projectId) {
+    await requireProjectAccess(auth, body.projectId, env, "read");
+  }
+
+  const currentOptions = normalizeWorkflowRunOptions(run.options);
+  const options = {
+    ...currentOptions,
+    ...buildWorkflowRunOptions({
+      prompt: body.prompt,
+      sourceUrl: safeUrl?.ok ? safeUrl.url : undefined,
+      durationSec: body.durationSec,
+      title: body.title,
+      projectId: body.projectId,
+      selectedGalleryContext: body.selectedGalleryContext,
+    }),
+    limits: currentOptions.limits ?? DEFAULT_WORKFLOW_LIMITS,
+  };
+  const now = new Date();
+  const values = {
+    projectId: body.projectId ?? null,
+    inputUrl: safeUrl?.ok ? safeUrl.url : "",
+    options: jsonRecord(options),
+    progress: jsonRecord(progress(0, "Ready for brief")),
+    updatedAt: now,
+  };
+  await createDb(env)
+    .update(workflowRuns)
+    .set(values)
+    .where(and(eq(workflowRuns.id, run.id), eq(workflowRuns.organizationId, auth.organization.id)));
+  return workflowRunToClient({
+    ...run,
+    ...values,
+    options,
+    progress: progress(0, "Ready for brief"),
+    updatedAt: now,
+  });
+}
+
 export async function continueWebsiteToVideoWorkflowRun(
   env: WorkerEnv,
   auth: AppAuthContext,
@@ -267,15 +360,34 @@ export async function continueWebsiteToVideoWorkflowRun(
   ctx?: WorkflowExecutionContext,
 ): Promise<WorkflowRunClient> {
   const run = await getRunForOrg(env, auth, runId);
-  if (run.status !== "awaiting_approval" && run.status !== "queued") {
+  if (run.status !== "intake" && run.status !== "awaiting_approval" && run.status !== "queued") {
     throw new WorkflowApiError(`workflow cannot continue from ${run.status}`, 409);
+  }
+  let nextRun = run;
+  if (run.status === "intake") {
+    const safeUrl = validateWorkflowUrl(run.inputUrl);
+    if (!safeUrl.ok) {
+      throw new WorkflowApiError("workflow needs a valid source URL before execution", 409);
+    }
+    const now = new Date();
+    await updateRun(env, run.id, auth.organization.id, {
+      status: "queued",
+      progress: jsonRecord(progress(0, "Queued")),
+      updatedAt: now,
+    });
+    nextRun = {
+      ...run,
+      status: "queued",
+      progress: progress(0, "Queued"),
+      updatedAt: now,
+    };
   }
   if (ctx) {
     ctx.waitUntil(runWebsiteToVideoWorkflow(env, auth, run.id).catch((err) => {
       console.error("website-to-video workflow continuation failed", err);
     }));
   }
-  return workflowRunToClient(run);
+  return workflowRunToClient(nextRun);
 }
 
 export async function cancelWebsiteToVideoWorkflowRun(
@@ -1035,7 +1147,7 @@ function jsonRecord(value: object): Record<string, unknown> {
 
 function asStatus(value: unknown): WorkflowStatus {
   const status = String(value) as WorkflowStatus;
-  return ["queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled"].includes(status)
+  return ["intake", "queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled"].includes(status)
     ? status
     : "failed";
 }

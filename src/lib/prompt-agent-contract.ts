@@ -266,7 +266,7 @@ export const workflowRunClientSchema = z.object({
   id: z.string(),
   projectId: z.string().nullable(),
   skillId: z.string(),
-  status: z.enum(["queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled"]),
+  status: z.enum(["intake", "queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled"]),
   phase: z.enum(["preflight", "capture", "compose", "validate", "persist", "complete"]),
   inputUrl: z.string(),
   options: z.record(z.string(), z.unknown()).nullable(),
@@ -381,7 +381,7 @@ export const getHyperframesWorkflowRunTool = toolDefinition({
 
 export const continueHyperframesWorkflowTool = toolDefinition({
   name: "continue_hyperframes_workflow",
-  description: "Continue an approved HyperFrames workflow run that is queued or awaiting approval.",
+  description: "Continue an approved HyperFrames workflow run that is in intake, queued, or awaiting approval.",
   inputSchema: workflowRunLookupInputSchema,
   outputSchema: workflowRunClientSchema,
   needsApproval: true,
@@ -389,7 +389,7 @@ export const continueHyperframesWorkflowTool = toolDefinition({
 
 export const cancelHyperframesWorkflowTool = toolDefinition({
   name: "cancel_hyperframes_workflow",
-  description: "Cancel an approved queued, running, or awaiting-approval HyperFrames workflow run.",
+  description: "Cancel an approved intake, queued, running, or awaiting-approval HyperFrames workflow run.",
   inputSchema: workflowRunLookupInputSchema,
   outputSchema: workflowRunClientSchema,
   needsApproval: true,

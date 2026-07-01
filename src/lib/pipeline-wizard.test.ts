@@ -83,4 +83,27 @@ describe("pipeline wizard stage planning", () => {
     expect(plan.activeStageId).toBe("capture");
     expect(plan.stages.find((stage) => stage.id === "capture")?.status).toBe("running");
   });
+
+  it("opens intake runs on an editable brief stage", () => {
+    const plan = buildWizardStagePlan(workflowRun({
+      projectId: null,
+      status: "intake",
+      phase: "preflight",
+      inputUrl: "",
+      artifacts: [],
+      options: {
+        intake: {
+          source: "main-page-chat",
+          prompt: "Make a compact launch video",
+        },
+      },
+    }));
+
+    expect(plan.activeStageId).toBe("capture");
+    expect(plan.stages.find((stage) => stage.id === "capture")).toMatchObject({
+      label: "Brief",
+      status: "ready",
+      editable: true,
+    });
+  });
 });

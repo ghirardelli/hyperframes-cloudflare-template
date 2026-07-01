@@ -7,6 +7,7 @@ import {
   passwordFormSchema,
   profileFormSchema,
   projectMetadataFormSchema,
+  workflowIntakeFormSchema,
 } from "./form-schemas";
 
 describe("form schemas", () => {
@@ -68,5 +69,18 @@ describe("form schemas", () => {
       exportResolutionId: "1080p",
       renderFormat: "mp4",
     });
+  });
+
+  it("validates workflow intake and normalizes duration", () => {
+    expect(
+      workflowIntakeFormSchema.parse({
+        prompt: " Make a compact launch video ",
+        durationSec: 7.7,
+      }),
+    ).toEqual({
+      prompt: "Make a compact launch video",
+      durationSec: 8,
+    });
+    expect(workflowIntakeFormSchema.safeParse({ prompt: "", durationSec: 6 }).success).toBe(false);
   });
 });

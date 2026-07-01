@@ -9,6 +9,7 @@ import {
 
 import { apiJson } from "./api-client";
 import type { SelectedGalleryPromptContext } from "./hyperframe-gallery-catalog";
+import type { WorkflowIntakePayload } from "./workflow-intake";
 import {
   buildRenderRequestBody,
   type ExportResolutionId,
@@ -110,6 +111,15 @@ export interface RenderResponse {
   url?: string;
   durationMs?: number;
   source?: "bundled" | "html";
+}
+
+export interface StartWebsiteToVideoWorkflowRequest {
+  prompt?: string;
+  url?: string;
+  durationSec?: number;
+  title?: string;
+  projectId?: string;
+  selectedGalleryContext?: SelectedGalleryPromptContext;
 }
 
 export function useMeQuery(): UseQueryResult<CurrentUserResponse> {
@@ -339,6 +349,21 @@ export function useRenderMutation() {
   });
 }
 
+export function useStartWebsiteToVideoWorkflowMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: StartWebsiteToVideoWorkflowRequest) =>
+      apiJson<{ workflowRun: WorkflowRunOutput }>("/api/workflows/website-to-video", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }).then((data) => data.workflowRun),
+    onSuccess: (workflowRun) => {
+      queryClient.setQueryData(queryKeys.workflows.run(workflowRun.id), workflowRun);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workflows.root() });
+    },
+  });
+}
+
 export function useWorkflowRunQuery(runId: string | null | undefined, status?: string | null) {
   return useQuery({
     queryKey: queryKeys.workflows.run(runId ?? ""),
@@ -413,6 +438,39 @@ export function useSaveWorkflowStageArtifactMutation() {
   });
 }
 
+export function useSaveWorkflowIntakeMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { runId: string; intake: WorkflowIntakePayload }) =>
+      apiJson<{ workflowRun: WorkflowRunOutput }>(
+        `/api/workflows/${encodeURIComponent(input.runId)}/intake`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(input.intake),
+        },
+      ).then((data) => data.workflowRun),
+    onSuccess: (workflowRun) => {
+      queryClient.setQueryData(queryKeys.workflows.run(workflowRun.id), workflowRun);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workflows.stages(workflowRun.id) });
+    },
+  });
+}
+
+export function useContinueWorkflowMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: string) =>
+      apiJson<{ workflowRun: WorkflowRunOutput }>(
+        `/api/workflows/${encodeURIComponent(runId)}/continue`,
+        { method: "POST" },
+      ).then((data) => data.workflowRun),
+    onSuccess: (workflowRun) => {
+      queryClient.setQueryData(queryKeys.workflows.run(workflowRun.id), workflowRun);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workflows.stages(workflowRun.id) });
+    },
+  });
+}
+
 export function useValidateWorkflowStageMutation() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -468,7 +526,7 @@ export function isRenderPollingStatus(status: string | null | undefined): boolea
   return !TERMINAL_RENDER_STATUSES.has(status.toLowerCase());
 }
 
-const ACTIVE_WORKFLOW_STATUSES = new Set(["queued", "running", "awaiting_approval"]);
+const ACTIVE_WORKFLOW_STATUSES = new Set(["intake", "queued", "running", "awaiting_approval"]);
 const TERMINAL_RENDER_STATUSES = new Set(["ready", "failed", "cancelled", "unavailable"]);
 
 function invalidateAdminCaches(queryClient: QueryClient): void {

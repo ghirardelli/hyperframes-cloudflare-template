@@ -4,6 +4,7 @@ import type {
 } from "./website-to-video-workflow";
 
 export type WorkflowStatus =
+  | "intake"
   | "queued"
   | "running"
   | "awaiting_approval"
@@ -64,9 +65,15 @@ export interface WorkflowRunClient {
   completedAt: string | null;
 }
 
-const ACTIVE_STATUSES = new Set<WorkflowStatus>(["queued", "running", "awaiting_approval"]);
+const ACTIVE_STATUSES = new Set<WorkflowStatus>([
+  "intake",
+  "queued",
+  "running",
+  "awaiting_approval",
+]);
 
 const VALID_TRANSITIONS: Record<WorkflowStatus, ReadonlyArray<WorkflowStatus>> = {
+  intake: ["queued", "cancelled", "failed"],
   queued: ["running", "cancelled", "failed"],
   running: ["awaiting_approval", "succeeded", "failed", "cancelled"],
   awaiting_approval: ["running", "succeeded", "failed", "cancelled"],

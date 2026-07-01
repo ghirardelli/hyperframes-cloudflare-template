@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { WorkflowRunOutput } from "./prompt-agent-client";
+import { getWorkflowIntakePayload } from "./workflow-intake";
 
 export const wizardStageIdSchema = z.enum([
   "capture",
@@ -47,6 +48,7 @@ export const wizardStagePlanSchema = z.object({
   projectId: z.string().nullable(),
   workflowId: z.string().min(1),
   status: z.string().min(1),
+  options: z.record(z.string(), z.unknown()).nullable(),
   activeStageId: wizardStageIdSchema,
   stages: z.array(wizardStageSchema),
   studioUrl: z.string().nullable(),
@@ -165,6 +167,7 @@ export function buildWizardStagePlan(run: WorkflowRunOutput): WizardStagePlan {
     projectId: run.projectId,
     workflowId: run.skillId,
     status: run.status,
+    options: run.options,
     activeStageId: activeStageForRun(run),
     stages,
     studioUrl: run.studioUrl,
@@ -193,6 +196,8 @@ export function wizardArtifactLabel(path: string): string {
 }
 
 function buildWizardStage(id: WizardStageId, run: WorkflowRunOutput): WizardStage {
+  const intake = getWorkflowIntakePayload(run.options);
+  const isIntakeBriefStage = run.status === "intake" && id === "capture" && Boolean(intake);
   const artifacts = run.artifacts
     .filter((artifact) => stageIdForArtifactPath(artifact.path) === id)
     .map((artifact) => ({
@@ -205,11 +210,18 @@ function buildWizardStage(id: WizardStageId, run: WorkflowRunOutput): WizardStag
     }));
   const skippedReason = skippedReasonForStage(id, run);
   const status = stageStatus(id, run, artifacts.length, skippedReason);
+  const details = isIntakeBriefStage
+    ? {
+        label: "Brief",
+        description: "Review prompt, selected templates, components, and source details.",
+        required: true,
+      }
+    : STAGE_DETAILS[id];
   return {
     id,
-    ...STAGE_DETAILS[id],
-    status,
-    editable: artifacts.some((artifact) => artifact.editable),
+    ...details,
+    status: isIntakeBriefStage ? "ready" : status,
+    editable: isIntakeBriefStage || artifacts.some((artifact) => artifact.editable),
     artifacts,
     skippedReason,
     validationMessage: validationMessageForStage(id, run),
@@ -217,6 +229,7 @@ function buildWizardStage(id: WizardStageId, run: WorkflowRunOutput): WizardStag
 }
 
 function activeStageForRun(run: WorkflowRunOutput): WizardStageId {
+  if (run.status === "intake") return "capture";
   switch (run.phase) {
     case "capture":
       return "capture";
@@ -240,6 +253,9 @@ function stageStatus(
   skippedReason: string | undefined,
 ): WizardStage["status"] {
   if (skippedReason) return "skipped";
+  if (run.status === "intake") {
+    return id === "capture" ? "ready" : "not_started";
+  }
   if (run.status === "failed" && activeStageForRun(run) === id) return "failed";
   if ((run.status === "running" || run.status === "queued") && activeStageForRun(run) === id) {
     return "running";

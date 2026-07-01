@@ -175,6 +175,193 @@ describe("website-to-video workflow API", () => {
     });
   });
 
+  it("creates an intake run from a main-page prompt without starting execution", async () => {
+    mocks.selectRows = [[]]; // active quota lookup
+
+    const response = await handleWorkerApi(
+      new Request("https://mf.test/api/workflows/website-to-video", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          prompt: "Turn https://example.com into a compact launch video",
+          durationSec: 10,
+          selectedGalleryContext: {
+            examples: [
+              {
+                id: "template-1",
+                kind: "example",
+                name: "Launch template",
+                sourceUrl: "https://example.com/template",
+                promptText: "Use crisp pacing.",
+                materialization: { state: "prompt-only" },
+              },
+            ],
+            components: [],
+          },
+        }),
+      }),
+      env,
+    );
+
+    expect(response?.status).toBe(202);
+    await expect(response?.json()).resolves.toMatchObject({
+      workflowRun: {
+        skillId: "website-to-video",
+        status: "intake",
+        phase: "preflight",
+        inputUrl: "https://example.com/",
+        options: {
+          intake: {
+            prompt: "Turn https://example.com into a compact launch video",
+            selectedGalleryContext: {
+              examples: [expect.objectContaining({ id: "template-1" })],
+            },
+          },
+        },
+      },
+    });
+    expect(mocks.inserts[0]).toMatchObject({
+      organizationId: "org-1",
+      userId: "user-1",
+      skillId: "website-to-video",
+      status: "intake",
+      phase: "preflight",
+      inputUrl: "https://example.com/",
+    });
+    expect(mocks.updates).toHaveLength(0);
+  });
+
+  it("updates an intake run brief without requiring project artifacts", async () => {
+    mocks.selectRows = [[{
+      id: "run-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      projectId: null,
+      skillId: "website-to-video",
+      status: "intake",
+      phase: "preflight",
+      inputUrl: "",
+      options: { intake: { source: "main-page-chat", prompt: "Initial" } },
+      progress: { current: 0, total: 6, label: "Ready for brief" },
+      artifactManifest: null,
+      error: null,
+      createdAt: new Date("2026-06-29T12:00:00Z"),
+      updatedAt: new Date("2026-06-29T12:01:00Z"),
+      startedAt: null,
+      completedAt: null,
+    }]];
+
+    const response = await handleWorkerApi(
+      new Request("https://mf.test/api/workflows/run-1/intake", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          source: "main-page-chat",
+          prompt: "Updated brief",
+          sourceUrl: "https://example.com",
+          durationSec: 12,
+        }),
+      }),
+      env,
+    );
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({
+      workflowRun: {
+        id: "run-1",
+        status: "intake",
+        inputUrl: "https://example.com/",
+        options: {
+          intake: {
+            prompt: "Updated brief",
+            sourceUrl: "https://example.com/",
+            durationSec: 12,
+          },
+        },
+      },
+    });
+    expect(mocks.updates[0]).toMatchObject({
+      inputUrl: "https://example.com/",
+      options: expect.objectContaining({
+        intake: expect.objectContaining({ prompt: "Updated brief" }),
+      }),
+    });
+  });
+
+  it("requires a source URL before continuing an intake run", async () => {
+    mocks.selectRows = [[{
+      id: "run-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      projectId: null,
+      skillId: "website-to-video",
+      status: "intake",
+      phase: "preflight",
+      inputUrl: "",
+      options: { intake: { source: "main-page-chat", prompt: "No URL yet" } },
+      progress: { current: 0, total: 6, label: "Ready for brief" },
+      artifactManifest: null,
+      error: null,
+      createdAt: new Date("2026-06-29T12:00:00Z"),
+      updatedAt: new Date("2026-06-29T12:01:00Z"),
+      startedAt: null,
+      completedAt: null,
+    }]];
+
+    const response = await handleWorkerApi(
+      new Request("https://mf.test/api/workflows/run-1/continue", {
+        method: "POST",
+      }),
+      env,
+    );
+
+    expect(response?.status).toBe(409);
+    await expect(response?.json()).resolves.toEqual({
+      error: "workflow needs a valid source URL before execution",
+    });
+  });
+
+  it("queues an intake run for execution after the brief has a source URL", async () => {
+    mocks.selectRows = [[{
+      id: "run-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      projectId: null,
+      skillId: "website-to-video",
+      status: "intake",
+      phase: "preflight",
+      inputUrl: "https://example.com/",
+      options: { intake: { source: "main-page-chat", prompt: "Ready" } },
+      progress: { current: 0, total: 6, label: "Ready for brief" },
+      artifactManifest: null,
+      error: null,
+      createdAt: new Date("2026-06-29T12:00:00Z"),
+      updatedAt: new Date("2026-06-29T12:01:00Z"),
+      startedAt: null,
+      completedAt: null,
+    }]];
+
+    const response = await handleWorkerApi(
+      new Request("https://mf.test/api/workflows/run-1/continue", {
+        method: "POST",
+      }),
+      env,
+    );
+
+    expect(response?.status).toBe(202);
+    await expect(response?.json()).resolves.toMatchObject({
+      workflowRun: {
+        id: "run-1",
+        status: "queued",
+        inputUrl: "https://example.com/",
+      },
+    });
+    expect(mocks.updates[0]).toMatchObject({
+      status: "queued",
+      progress: { current: 0, total: 6, label: "Queued" },
+    });
+  });
+
   it("returns only organization-scoped workflow status", async () => {
     mocks.selectRows = [[{
       id: "run-1",
