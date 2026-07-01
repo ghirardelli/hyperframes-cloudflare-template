@@ -464,7 +464,10 @@ export function PromptAgentPanel({
   );
 
   return (
-    <div className="flex h-[calc(100dvh-8rem)] min-h-[560px] flex-col gap-3 lg:h-auto lg:min-h-0 lg:flex-1">
+    <section
+      aria-label="AI prompt agent panel"
+      className="flex h-[calc(100dvh-8rem)] min-h-[560px] flex-col gap-3 overflow-hidden pb-2 lg:h-auto lg:min-h-0 lg:flex-1"
+    >
       <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 rounded-md border border-hairline bg-background px-3 py-2">
         <div>
           <div className="text-sm font-medium text-foreground">AI prompt agent</div>
@@ -526,7 +529,7 @@ export function PromptAgentPanel({
         </div>
       ) : null}
 
-      <div className="mt-auto shrink-0 space-y-2 border-t border-hairline pt-3">
+      <div className="mt-auto shrink-0 space-y-2 border-t border-hairline pb-1 pt-3">
         <div className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
           Ask the agent
         </div>
@@ -673,7 +676,7 @@ export function PromptAgentPanel({
           </Button>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 

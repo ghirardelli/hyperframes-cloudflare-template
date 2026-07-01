@@ -64,6 +64,9 @@ import {
 import { creationIntakeFormSchema, type CreationIntakeFormValues } from "@/lib/form-schemas";
 import { fieldError } from "@/lib/form-utils";
 import {
+  MAIN_PAGE_CREATE_ASIDE_CLASS,
+  MAIN_PAGE_CREATE_CARD_CLASS,
+  MAIN_PAGE_CREATE_CARD_CONTENT_CLASS,
   MAIN_PAGE_GRID_CLASS,
   SELECTED_CONTEXT_BOX_CLASS,
   SELECTED_CONTEXT_CHIP_CLASS,
@@ -373,8 +376,8 @@ function MotionFramesHome() {
           playerRef={playerRef}
         />
 
-        <aside className="flex min-w-0 flex-col gap-4 lg:min-h-0">
-          <Card className="flex overflow-visible lg:h-full lg:min-h-0 lg:flex-col">
+        <aside className={MAIN_PAGE_CREATE_ASIDE_CLASS}>
+          <Card className={MAIN_PAGE_CREATE_CARD_CLASS}>
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -403,7 +406,7 @@ function MotionFramesHome() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
+            <CardContent className={MAIN_PAGE_CREATE_CARD_CONTENT_CLASS}>
               <div
                 role="tablist"
                 aria-label="Creation mode"
@@ -454,13 +457,13 @@ function MotionFramesHome() {
                 </button>
               </div>
 
-          <SelectedGalleryContextChips
-            context={selectedGalleryContext}
-            disabled={isGenerating || isRendering}
-            onRemoveExample={removeSelectedExample}
-            onRemoveComponent={removeSelectedComponent}
-            onUpdateComponentPlacementIntent={updateComponentPlacementIntent}
-          />
+              <SelectedGalleryContextChips
+                context={selectedGalleryContext}
+                disabled={isGenerating || isRendering}
+                onRemoveExample={removeSelectedExample}
+                onRemoveComponent={removeSelectedComponent}
+                onUpdateComponentPlacementIntent={updateComponentPlacementIntent}
+              />
 
               {visibleCreationTab === "agent" ? (
                 <PromptAgentPanel

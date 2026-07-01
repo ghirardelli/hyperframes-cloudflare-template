@@ -150,8 +150,12 @@ describe("PromptAgentPanel media inputs", () => {
     renderPanel();
 
     const thread = screen.getByRole("log", { name: /agent conversation/i });
+    const panel = screen.getByRole("region", { name: /ai prompt agent panel/i });
     const composer = screen.getByLabelText("Ask the agent");
+    const composerRegion = composer.closest(".border-t");
+    expect(panel).toHaveClass("lg:min-h-0", "lg:flex-1", "overflow-hidden", "pb-2");
     expect(thread).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
+    expect(composerRegion).toHaveClass("shrink-0", "pb-1");
     expect(thread.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText("Thread message 16")).toBeInTheDocument();
     expect(composer).toBeInTheDocument();

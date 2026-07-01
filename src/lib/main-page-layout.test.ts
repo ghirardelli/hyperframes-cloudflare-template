@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   COMPONENT_FILTER_BUTTON_CLASS,
   COMPONENT_FILTER_ROW_CLASS,
+  MAIN_PAGE_CREATE_ASIDE_CLASS,
+  MAIN_PAGE_CREATE_CARD_CLASS,
+  MAIN_PAGE_CREATE_CARD_CONTENT_CLASS,
   MAIN_PAGE_GRID_CLASS,
   SELECTED_CONTEXT_BOX_CLASS,
   SELECTED_CONTEXT_CHIP_CLASS,
@@ -14,7 +17,21 @@ describe("main page layout classes", () => {
     expect(MAIN_PAGE_GRID_CLASS).toContain("lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]");
     expect(MAIN_PAGE_GRID_CLASS).toContain("lg:h-[calc(100dvh_-_4rem)]");
     expect(MAIN_PAGE_GRID_CLASS).toContain("lg:min-h-0");
+    expect(MAIN_PAGE_GRID_CLASS).toContain("lg:grid-rows-[minmax(0,1fr)]");
     expect(MAIN_PAGE_GRID_CLASS).toContain("lg:items-stretch");
+    expect(MAIN_PAGE_GRID_CLASS).toContain("pb-6");
+  });
+
+  it("locks the create panel to the viewport instead of letting controls overflow", () => {
+    expect(MAIN_PAGE_CREATE_ASIDE_CLASS).toContain("lg:h-full");
+    expect(MAIN_PAGE_CREATE_ASIDE_CLASS).toContain("lg:min-h-0");
+    expect(MAIN_PAGE_CREATE_ASIDE_CLASS).toContain("lg:overflow-hidden");
+    expect(MAIN_PAGE_CREATE_CARD_CLASS).toContain("overflow-hidden");
+    expect(MAIN_PAGE_CREATE_CARD_CLASS).toContain("lg:h-full");
+    expect(MAIN_PAGE_CREATE_CARD_CLASS).toContain("lg:min-h-0");
+    expect(MAIN_PAGE_CREATE_CARD_CONTENT_CLASS).toContain("min-h-0");
+    expect(MAIN_PAGE_CREATE_CARD_CONTENT_CLASS).toContain("flex-1");
+    expect(MAIN_PAGE_CREATE_CARD_CONTENT_CLASS).toContain("overflow-hidden");
   });
 
   it("wraps compact component filters without horizontal scrolling", () => {
