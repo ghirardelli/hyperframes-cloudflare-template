@@ -13,7 +13,7 @@
   // run the render container on your account from generated HTML.
   "vars": {
     "ENABLE_AI_GEN": "true",
-    "ENABLE_WEBSITE_TO_VIDEO_WORKFLOW": "false",
+    "ENABLE_WEBSITE_TO_VIDEO_WORKFLOW": "true",
     // Optional first-admin bootstrap. Remove after assigning real admin users:
     // "INITIAL_ADMIN_EMAILS": "admin@example.com"
     // Optional model override:

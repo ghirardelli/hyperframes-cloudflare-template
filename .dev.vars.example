@@ -5,6 +5,11 @@ OPENROUTER_API_KEY=
 # Optional. Defaults to the app's server-side model when omitted.
 # OPENROUTER_MODEL=google/gemini-3-flash-preview
 
+# Optional prompt-agent voice input. Required for browser recordings to be
+# transcribed server-side; omit to keep the microphone UI disabled.
+# OPENAI_API_KEY=
+# OPENAI_TRANSCRIPTION_MODEL=whisper-1
+
 DATABASE_URL="postgresql://USER:PASSWORD@HOST.neon.tech/neondb?sslmode=require"
 BETTER_AUTH_SECRET="replace-with-a-long-random-secret"
 BETTER_AUTH_URL="http://localhost:5173"

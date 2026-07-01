@@ -40,6 +40,8 @@ export interface CurrentUserResponse {
 export interface ConfigResponse {
   aiGenEnabled: boolean;
   websiteToVideoWorkflowEnabled?: boolean;
+  voiceInputEnabled?: boolean;
+  transcriptionProviderLabel?: string | null;
   modelLabel: string;
 }
 

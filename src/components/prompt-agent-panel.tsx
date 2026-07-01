@@ -1,14 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+} from "react";
+import type { TranscriptionResult } from "@tanstack/ai";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useChat } from "@tanstack/ai-react";
+import { useAudioRecorder, useChat, useTranscription } from "@tanstack/ai-react";
 import { clientTools, fetchServerSentEvents } from "@tanstack/ai-client";
-import type { UIMessage } from "@tanstack/ai-client";
+import type { AudioRecording, TranscriptionGenerateInput, UIMessage } from "@tanstack/ai-client";
 import {
   Check,
   ExternalLink,
   Loader2,
   MessageCircle,
+  Mic,
+  Paperclip,
   RotateCcw,
   Send,
   Square,
@@ -20,12 +30,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { messageFromError } from "@/lib/api-client";
 import { invalidateProjectCaches, useWorkflowRunQuery } from "@/lib/app-queries";
 import {
   highlightAgentSectionTool,
+  promptAgentAttachedAssetSchema,
   promptAgentResultSchema,
+  promptAgentTranscriptionResultSchema,
   setDraftPromptTool,
   type GenerateHyperframeOutput,
+  type PromptAgentAttachedAsset,
 } from "@/lib/prompt-agent-contract";
 import type { SelectedGalleryPromptContext } from "@/lib/hyperframe-gallery-catalog";
 import {
@@ -46,6 +60,8 @@ interface PromptAgentPanelProps {
   aiEnabled: boolean;
   isConfigReady: boolean;
   modelLabel: string;
+  voiceInputEnabled?: boolean;
+  transcriptionProviderLabel?: string | null;
   activeProjectId: string;
   activeProjectTitle: string;
   workflowRunId?: string;
@@ -68,6 +84,18 @@ type PromptAgentPartialResult = {
   }>;
 };
 
+type ComposerAttachment = PromptAgentAttachedAsset & {
+  id: string;
+  name: string;
+  status: "uploading" | "ready" | "error";
+  error?: string;
+};
+
+type PromptAgentTranscriptionInput = TranscriptionGenerateInput & {
+  mimeType?: string;
+  durationMs?: number;
+};
+
 export function PromptAgentPanel({
   prompt,
   onPromptChange,
@@ -76,6 +104,8 @@ export function PromptAgentPanel({
   aiEnabled,
   isConfigReady,
   modelLabel,
+  voiceInputEnabled = false,
+  transcriptionProviderLabel,
   activeProjectId,
   activeProjectTitle,
   workflowRunId,
@@ -88,32 +118,27 @@ export function PromptAgentPanel({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [agentInput, setAgentInput] = useState("");
+  const [attachments, setAttachments] = useState<Array<ComposerAttachment>>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [focusedSection, setFocusedSection] = useState<
     "chat" | "draft" | "checklist" | "approval" | "preview"
   >("chat");
   const appliedGenerationKeysRef = useRef(new Set<string>());
   const invalidatedWorkflowProjectIdsRef = useRef(new Set<string>());
-  const forwardedPropsRef = useRef({
-    projectId: activeProjectId || undefined,
-    currentPrompt: prompt,
-    durationSec,
-    activeProjectTitle: activeProjectTitle || undefined,
-    workflowRunId,
-    activeWizardStageId,
-    selectedGalleryContext,
-  });
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const readyAttachedAssets = useMemo(
+    () =>
+      attachments
+        .filter((attachment) => attachment.status === "ready")
+        .map(({ id: _id, name: _name, status: _status, error: _error, ...asset }) => asset),
+    [attachments],
+  );
+  const forwardedPropsRef = useRef(buildForwardedProps(readyAttachedAssets));
 
   useEffect(() => {
-    forwardedPropsRef.current = {
-      projectId: activeProjectId || undefined,
-      currentPrompt: prompt,
-      durationSec,
-      activeProjectTitle: activeProjectTitle || undefined,
-      workflowRunId,
-      activeWizardStageId,
-      selectedGalleryContext,
-    };
-  }, [activeProjectId, activeProjectTitle, activeWizardStageId, durationSec, prompt, selectedGalleryContext, workflowRunId]);
+    forwardedPropsRef.current = buildForwardedProps(readyAttachedAssets);
+  }, [activeProjectId, activeProjectTitle, activeWizardStageId, durationSec, prompt, readyAttachedAssets, selectedGalleryContext, workflowRunId]);
 
   const connection = useMemo(
     () =>
@@ -157,6 +182,23 @@ export function PromptAgentPanel({
     outputSchema: promptAgentResultSchema,
   });
 
+  const transcription = useTranscription({
+    fetcher: transcribeAudio,
+    onError: (err) => setVoiceError(messageFromError(err)),
+    onResult: (result) => {
+      const text = result.text?.trim();
+      if (text) {
+        setAgentInput((current) => (current.trim() ? `${current.trim()}\n${text}` : text));
+      }
+      setVoiceError(null);
+      return result;
+    },
+  });
+  const audioRecorder = useAudioRecorder({
+    mimeType: "audio/webm",
+    onError: (err) => setVoiceError(messageFromError(err)),
+  });
+
   useEffect(() => {
     const generated = findLatestGeneratedHyperframe(
       messages,
@@ -169,6 +211,16 @@ export function PromptAgentPanel({
   }, [messages, onGenerated]);
 
   const canUseAgent = isConfigReady && aiEnabled && !isGenerating && !isRendering;
+  const hasUploadingAttachments = attachments.some((attachment) => attachment.status === "uploading");
+  const canUploadAttachments = canUseAgent && Boolean(activeProjectId);
+  const canRecordVoice =
+    canUseAgent && voiceInputEnabled && audioRecorder.isSupported && !transcription.isLoading;
+  const voiceButtonLabel = getVoiceButtonLabel({
+    configured: voiceInputEnabled,
+    supported: audioRecorder.isSupported,
+    recording: audioRecorder.isRecording,
+    transcribing: transcription.isLoading,
+  });
   const promptPackage =
     final ?? normalizePartialResult(partial as PromptAgentPartialResult);
   const hasPackagePrompt = Boolean(promptPackage?.generationPrompt?.trim());
@@ -203,9 +255,173 @@ export function PromptAgentPanel({
 
   async function submitAgentMessage() {
     const message = agentInput.trim();
-    if (!message || !canUseAgent || isLoading) return;
+    if (!message || !canUseAgent || isLoading || hasUploadingAttachments) return;
+    const attachedAssets = readyAttachedAssets;
+    forwardedPropsRef.current = buildForwardedProps(attachedAssets);
     setAgentInput("");
     await sendMessage(message);
+    setAttachments([]);
+    setAttachmentError(null);
+  }
+
+  async function transcribeAudio(
+    input: TranscriptionGenerateInput,
+    options?: { signal: AbortSignal },
+  ): Promise<TranscriptionResult> {
+    const mediaInput = input as PromptAgentTranscriptionInput;
+    if (typeof mediaInput.audio !== "string") {
+      throw new Error("Audio recording was not encoded for transcription.");
+    }
+    const response = await fetch("/api/agent/transcribe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal: options?.signal,
+      body: JSON.stringify({
+        audio: mediaInput.audio,
+        mimeType: mediaInput.mimeType || "audio/webm",
+        durationMs: mediaInput.durationMs,
+        language: mediaInput.language,
+        prompt: mediaInput.prompt,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error((data as { error?: string }).error || "Transcription failed");
+    }
+    const result = promptAgentTranscriptionResultSchema.parse(data);
+    return {
+      id: makeAttachmentId(),
+      model: transcriptionProviderLabel || "server-transcription",
+      text: result.text,
+      ...(result.language ? { language: result.language } : {}),
+      ...(result.durationSec !== undefined ? { duration: result.durationSec } : {}),
+    };
+  }
+
+  async function handleVoiceInput() {
+    setVoiceError(null);
+    if (audioRecorder.isRecording) {
+      try {
+        const recording = (await audioRecorder.stop()) as AudioRecording;
+        await transcription.generate({
+          audio: `data:${recording.mimeType};base64,${recording.base64}`,
+          durationMs: recording.durationMs,
+          mimeType: recording.mimeType,
+        } as PromptAgentTranscriptionInput);
+      } catch (err) {
+        setVoiceError(messageFromError(err));
+      }
+      return;
+    }
+    if (!canRecordVoice) return;
+    try {
+      await audioRecorder.start();
+    } catch (err) {
+      setVoiceError(messageFromError(err));
+    }
+  }
+
+  async function uploadAttachments(files: Array<File>) {
+    if (!files.length) return;
+    if (!canUploadAttachments) {
+      setAttachmentError("Open or generate a project before attaching files.");
+      return;
+    }
+    setAttachmentError(null);
+    for (const file of files) {
+      await uploadAttachment(file);
+    }
+  }
+
+  async function uploadAttachment(file: File) {
+    const id = makeAttachmentId();
+    const pending: ComposerAttachment = {
+      id,
+      name: file.name,
+      path: file.name,
+      contentType: file.type || "application/octet-stream",
+      size: file.size,
+      status: "uploading",
+    };
+    setAttachments((current) => [...current, pending]);
+
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(activeProjectId)}/agent-assets?filename=${encodeURIComponent(file.name)}`,
+        {
+          method: "POST",
+          headers: { "content-type": file.type || "application/octet-stream" },
+          body: file,
+        },
+      );
+      const rawData = await response.json().catch(() => ({}));
+      const data =
+        typeof rawData === "object" && rawData !== null
+          ? (rawData as Record<string, unknown>)
+          : {};
+      if (!response.ok) {
+        throw new Error((data as { error?: string }).error || "Attachment upload failed");
+      }
+      const asset = promptAgentAttachedAssetSchema.parse({
+        ...data,
+        originalName: file.name,
+      });
+      setAttachments((current) =>
+        current.map((attachment) =>
+          attachment.id === id
+            ? {
+                ...asset,
+                id,
+                name: file.name,
+                status: "ready",
+              }
+            : attachment,
+        ),
+      );
+      invalidateProjectCaches(queryClient, activeProjectId);
+    } catch (err) {
+      const error = messageFromError(err);
+      setAttachmentError(error);
+      setAttachments((current) =>
+        current.map((attachment) =>
+          attachment.id === id ? { ...attachment, status: "error", error } : attachment,
+        ),
+      );
+    }
+  }
+
+  function removeAttachment(id: string) {
+    setAttachments((current) => current.filter((attachment) => attachment.id !== id));
+  }
+
+  function handleAttachmentInput(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+    void uploadAttachments(files);
+  }
+
+  function handleComposerDrop(event: DragEvent<HTMLDivElement>) {
+    if (!event.dataTransfer.files.length) return;
+    event.preventDefault();
+    void uploadAttachments(Array.from(event.dataTransfer.files));
+  }
+
+  function handleComposerDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!canUploadAttachments) return;
+    event.preventDefault();
+  }
+
+  function buildForwardedProps(attachedAssets: Array<PromptAgentAttachedAsset>) {
+    return {
+      projectId: activeProjectId || undefined,
+      currentPrompt: prompt,
+      durationSec,
+      activeProjectTitle: activeProjectTitle || undefined,
+      workflowRunId,
+      activeWizardStageId,
+      selectedGalleryContext,
+      attachedAssets: attachedAssets.length ? attachedAssets : undefined,
+    };
   }
 
   function applyPromptPackage() {
@@ -293,26 +509,120 @@ export function PromptAgentPanel({
         <div className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
           Ask the agent
         </div>
-        <Textarea
-          aria-label="Ask the agent"
-          value={agentInput}
-          onChange={(event) => setAgentInput(event.target.value)}
-          rows={3}
-          placeholder="Describe the motion, mood, product, or problem to solve"
-          disabled={!canUseAgent || isLoading}
-          onKeyDown={(event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-              event.preventDefault();
-              void submitAgentMessage();
-            }
-          }}
+        <div onDrop={handleComposerDrop} onDragOver={handleComposerDragOver}>
+          <Textarea
+            aria-label="Ask the agent"
+            value={agentInput}
+            onChange={(event) => setAgentInput(event.target.value)}
+            rows={3}
+            placeholder="Describe the motion, mood, product, or problem to solve"
+            disabled={!canUseAgent || isLoading}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                event.preventDefault();
+                void submitAgentMessage();
+              }
+            }}
+          />
+        </div>
+        <input
+          ref={fileInputRef}
+          aria-label="Attach files"
+          type="file"
+          multiple
+          className="sr-only"
+          disabled={!canUploadAttachments || hasUploadingAttachments}
+          onChange={handleAttachmentInput}
         />
-        <div className="grid grid-cols-3 gap-2">
+        {attachments.length ? (
+          <div aria-label="Attached assets" className="flex flex-wrap gap-2">
+            {attachments.map((attachment) => (
+              <span
+                key={attachment.id}
+                className={cn(
+                  "inline-flex max-w-full items-center gap-2 rounded-md border px-2.5 py-1 text-xs",
+                  attachment.status === "error"
+                    ? "border-red-200 bg-red-50 text-red-900"
+                    : "border-hairline bg-surface-card text-body",
+                )}
+              >
+                {attachment.status === "uploading" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Paperclip className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+                <span className="max-w-52 truncate">
+                  {attachment.status === "ready" ? attachment.path : attachment.name}
+                </span>
+                {attachment.status === "ready" ? (
+                  <button
+                    type="button"
+                    className="rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20"
+                    aria-label={`Remove ${attachment.path}`}
+                    onClick={() => removeAttachment(attachment.id)}
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                ) : null}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {attachmentError ? (
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
+            {attachmentError}
+          </div>
+        ) : null}
+        {voiceError || transcription.error ? (
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
+            {voiceError || transcription.error?.message}
+          </div>
+        ) : null}
+        <div className="grid grid-cols-[auto_auto_minmax(0,1fr)_auto] gap-2">
           <Button
             type="button"
-            className="col-span-2"
+            variant="secondary"
+            aria-label={canUploadAttachments ? "Open attachment picker" : "Attachment upload unavailable"}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!canUploadAttachments || hasUploadingAttachments}
+            title={
+              canUploadAttachments
+                ? "Attach files"
+                : "Attach files after opening or generating a project"
+            }
+          >
+            {hasUploadingAttachments ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Paperclip className="h-4 w-4" aria-hidden="true" />
+            )}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            aria-label={voiceButtonLabel}
+            onClick={handleVoiceInput}
+            disabled={!canRecordVoice && !audioRecorder.isRecording}
+            title={
+              voiceInputEnabled
+                ? transcriptionProviderLabel
+                  ? `Voice input via ${transcriptionProviderLabel}`
+                  : "Voice input"
+                : "Voice input unavailable"
+            }
+          >
+            {transcription.isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : audioRecorder.isRecording ? (
+              <Square className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <Mic className="h-4 w-4" aria-hidden="true" />
+            )}
+          </Button>
+          <Button
+            type="button"
             onClick={submitAgentMessage}
-            disabled={!canUseAgent || isLoading || !agentInput.trim()}
+            disabled={!canUseAgent || isLoading || hasUploadingAttachments || !agentInput.trim()}
           >
             {isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -599,4 +909,29 @@ function formatDurationLabel(seconds: number): string {
 function looksLikeJson(value: string): boolean {
   const trimmed = value.trim();
   return trimmed.startsWith("{") || trimmed.startsWith("[");
+}
+
+function getVoiceButtonLabel({
+  configured,
+  supported,
+  recording,
+  transcribing,
+}: {
+  configured: boolean;
+  supported: boolean;
+  recording: boolean;
+  transcribing: boolean;
+}): string {
+  if (!configured) return "Voice input unavailable";
+  if (!supported) return "Microphone unavailable";
+  if (recording) return "Stop recording";
+  if (transcribing) return "Transcribing audio";
+  return "Start voice input";
+}
+
+function makeAttachmentId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }

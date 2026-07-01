@@ -47,14 +47,24 @@ function runtime(
   generateHyperframe = vi.fn(),
   forwardedDurationSec?: number,
   materializeHyperframeComponents = vi.fn(),
+  listProjectAssets = vi.fn(),
 ): PromptAgentToolContext {
   return {
     env: {} as WorkerEnv,
     auth,
     forwardedProjectId: "project-1",
     forwardedDurationSec,
+    forwardedAttachedAssets: [
+      {
+        path: "assets/logo.png",
+        url: "/api/projects/project-1/assets/assets/logo.png",
+        contentType: "image/png",
+        size: 123,
+      },
+    ],
     generateHyperframe,
     materializeHyperframeComponents,
+    listProjectAssets,
   };
 }
 
@@ -76,6 +86,8 @@ describe("prompt agent server tools", () => {
 
     expect(output.canvas).toMatchObject({ width: 1920, height: 1080 });
     expect(output.timelineRules.join(" ")).toContain("tl.fromTo");
+    expect(output.allowedResources.join(" ")).toContain("Project-scoped assets/");
+    expect(output.forbiddenPatterns.join(" ")).toContain("arbitrary CDN assets");
     expect(JSON.stringify(output)).not.toContain("Reference example");
     expect(JSON.stringify(output)).not.toContain("Return ONLY the complete HTML");
   });
@@ -92,6 +104,59 @@ describe("prompt agent server tools", () => {
     await expect(
       tool.execute({ ...validPromptPackage, durationSec: 999 }, { context: runtime() } as never),
     ).rejects.toThrow();
+  });
+
+  it("rejects prompt packages that reference unknown project assets", async () => {
+    const tool = getTool("prepare_prompt_package");
+
+    await expect(
+      tool.execute(
+        {
+          ...validPromptPackage,
+          generationPrompt: "Use assets/missing.png as the hero mark.",
+        },
+        { context: runtime() } as never,
+      ),
+    ).rejects.toThrow(/unknown project asset/i);
+    await expect(
+      tool.execute(
+        {
+          ...validPromptPackage,
+          generationPrompt: "Use assets/logo.png as the hero mark.",
+        },
+        { context: runtime() } as never,
+      ),
+    ).resolves.toMatchObject({
+      generationPrompt: "Use assets/logo.png as the hero mark.",
+    });
+  });
+
+  it("lists authorized project assets through a read-only tool", async () => {
+    const listProjectAssets = vi.fn().mockResolvedValue([
+      {
+        path: "assets/logo.png",
+        url: "/api/projects/project-1/assets/assets/logo.png",
+        contentType: "image/png",
+        size: 123,
+      },
+    ]);
+    const tool = getTool("list_project_assets");
+
+    expect(tool.needsApproval).not.toBe(true);
+    await expect(
+      tool.execute({}, { context: runtime(vi.fn(), undefined, vi.fn(), listProjectAssets) } as never),
+    ).resolves.toEqual({
+      projectId: "project-1",
+      assets: [
+        {
+          path: "assets/logo.png",
+          url: "/api/projects/project-1/assets/assets/logo.png",
+          contentType: "image/png",
+          size: 123,
+        },
+      ],
+    });
+    expect(listProjectAssets).toHaveBeenCalledWith("project-1");
   });
 
   it("exposes read-only skill catalog tools without touching projects or generation", async () => {
@@ -197,6 +262,40 @@ describe("prompt agent server tools", () => {
       title: undefined,
       selectedGalleryContext: undefined,
     });
+  });
+
+  it("preflights approved generation prompts against authorized project assets", async () => {
+    const output = {
+      html: "<!DOCTYPE html>",
+      project: { id: "project-1", title: "Launch Reel" },
+      model: "openrouter/auto",
+      attempts: 1,
+      durationMs: 42,
+      lintOk: true,
+      lintErrors: [],
+    };
+    const generateHyperframe = vi.fn().mockResolvedValue(output);
+    const tool = getTool("generate_hyperframe");
+
+    await expect(
+      tool.execute(
+        { prompt: "Animate assets/missing.png as the hero mark.", durationSec: 8 },
+        { context: runtime(generateHyperframe) } as never,
+      ),
+    ).rejects.toThrow(/unknown project asset/i);
+    expect(generateHyperframe).not.toHaveBeenCalled();
+
+    await expect(
+      tool.execute(
+        { prompt: "Animate assets/logo.png as the hero mark.", durationSec: 8 },
+        { context: runtime(generateHyperframe) } as never,
+      ),
+    ).resolves.toEqual(output);
+    expect(generateHyperframe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "Animate assets/logo.png as the hero mark.",
+      }),
+    );
   });
 
   it("materializes trusted components through an approval-gated id-and-placement tool", async () => {

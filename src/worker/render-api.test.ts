@@ -287,7 +287,25 @@ describe("handleWorkerApi", () => {
     await expect(response?.json()).resolves.toEqual({
       aiGenEnabled: true,
       websiteToVideoWorkflowEnabled: false,
+      voiceInputEnabled: false,
+      transcriptionProviderLabel: null,
       modelLabel: "google/gemini-3-flash-preview",
+    });
+  });
+
+  it("reports voice input as ready when OpenAI transcription is configured", async () => {
+    const response = await handleWorkerApi(
+      new Request("https://motion-frames.test/api/config"),
+      {
+        ENABLE_AI_GEN: "true",
+        OPENAI_API_KEY: "openai-key",
+        OPENAI_TRANSCRIPTION_MODEL: "gpt-4o-mini-transcribe",
+      } as WorkerEnv,
+    );
+
+    await expect(response?.json()).resolves.toMatchObject({
+      voiceInputEnabled: true,
+      transcriptionProviderLabel: "gpt-4o-mini-transcribe",
     });
   });
 

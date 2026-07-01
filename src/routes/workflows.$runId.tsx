@@ -181,6 +181,8 @@ function WorkflowWizardPage() {
             aiEnabled={aiEnabled}
             isConfigReady={!configQuery.isPending}
             modelLabel={configQuery.data?.modelLabel ?? "OpenRouter"}
+            voiceInputEnabled={configQuery.data?.voiceInputEnabled ?? false}
+            transcriptionProviderLabel={configQuery.data?.transcriptionProviderLabel ?? null}
             activeProjectId={stagePlan?.projectId ?? ""}
             activeProjectTitle={stagePlan?.workflowId ?? "Workflow"}
             workflowRunId={runId}

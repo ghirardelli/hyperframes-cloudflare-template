@@ -15,8 +15,8 @@ import { Route as PlaygroundRouteImport } from './routes/playground'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as WorkflowsRunIdRouteImport } from './routes/workflows.$runId'
 import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
+import { Route as WorkflowsRunIdRouteImport } from './routes/workflows.$runId'
 import { Route as ProjectsProjectIdStudioRouteImport } from './routes/projects.$projectId.studio'
 
 const ProjectsRoute = ProjectsRouteImport.update({
@@ -49,15 +49,15 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const WorkflowsRunIdRoute = WorkflowsRunIdRouteImport.update({
-  id: '/workflows/$runId',
-  path: '/workflows/$runId',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => ProjectsRoute,
+} as any)
+const WorkflowsRunIdRoute = WorkflowsRunIdRouteImport.update({
+  id: '/workflows/$runId',
+  path: '/workflows/$runId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ProjectsProjectIdStudioRoute = ProjectsProjectIdStudioRouteImport.update({
   id: '/$projectId/studio',
@@ -72,9 +72,9 @@ export interface FileRoutesByFullPath {
   '/playground': typeof PlaygroundRoute
   '/profile': typeof ProfileRoute
   '/projects': typeof ProjectsRouteWithChildren
+  '/workflows/$runId': typeof WorkflowsRunIdRoute
   '/projects/': typeof ProjectsIndexRoute
   '/projects/$projectId/studio': typeof ProjectsProjectIdStudioRoute
-  '/workflows/$runId': typeof WorkflowsRunIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -82,9 +82,9 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/playground': typeof PlaygroundRoute
   '/profile': typeof ProfileRoute
+  '/workflows/$runId': typeof WorkflowsRunIdRoute
   '/projects': typeof ProjectsIndexRoute
   '/projects/$projectId/studio': typeof ProjectsProjectIdStudioRoute
-  '/workflows/$runId': typeof WorkflowsRunIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -94,9 +94,9 @@ export interface FileRoutesById {
   '/playground': typeof PlaygroundRoute
   '/profile': typeof ProfileRoute
   '/projects': typeof ProjectsRouteWithChildren
+  '/workflows/$runId': typeof WorkflowsRunIdRoute
   '/projects/': typeof ProjectsIndexRoute
   '/projects/$projectId/studio': typeof ProjectsProjectIdStudioRoute
-  '/workflows/$runId': typeof WorkflowsRunIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -107,9 +107,9 @@ export interface FileRouteTypes {
     | '/playground'
     | '/profile'
     | '/projects'
+    | '/workflows/$runId'
     | '/projects/'
     | '/projects/$projectId/studio'
-    | '/workflows/$runId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -117,9 +117,9 @@ export interface FileRouteTypes {
     | '/login'
     | '/playground'
     | '/profile'
+    | '/workflows/$runId'
     | '/projects'
     | '/projects/$projectId/studio'
-    | '/workflows/$runId'
   id:
     | '__root__'
     | '/'
@@ -128,9 +128,9 @@ export interface FileRouteTypes {
     | '/playground'
     | '/profile'
     | '/projects'
+    | '/workflows/$runId'
     | '/projects/'
     | '/projects/$projectId/studio'
-    | '/workflows/$runId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -194,19 +194,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsIndexRouteImport
       parentRoute: typeof ProjectsRoute
     }
-    '/projects/$projectId/studio': {
-      id: '/projects/$projectId/studio'
-      path: '/$projectId/studio'
-      fullPath: '/projects/$projectId/studio'
-      preLoaderRoute: typeof ProjectsProjectIdStudioRouteImport
-      parentRoute: typeof ProjectsRoute
-    }
     '/workflows/$runId': {
       id: '/workflows/$runId'
       path: '/workflows/$runId'
       fullPath: '/workflows/$runId'
       preLoaderRoute: typeof WorkflowsRunIdRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/projects/$projectId/studio': {
+      id: '/projects/$projectId/studio'
+      path: '/$projectId/studio'
+      fullPath: '/projects/$projectId/studio'
+      preLoaderRoute: typeof ProjectsProjectIdStudioRouteImport
+      parentRoute: typeof ProjectsRoute
     }
   }
 }

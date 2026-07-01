@@ -38,3 +38,34 @@ export function basename(path: string): string {
   const index = path.lastIndexOf("/");
   return index >= 0 ? path.slice(index + 1) : path;
 }
+
+export function sanitizeAssetFilename(input: string): string {
+  const rawName = basename(input.trim().replace(/\\/g, "/"));
+  const lower = rawName.toLowerCase();
+  const extensionMatch = lower.match(/\.([a-z0-9]{1,12})$/);
+  const extension = extensionMatch ? `.${extensionMatch[1]}` : "";
+  const stemSource = extension ? lower.slice(0, -extension.length) : lower;
+  let stem = stemSource
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!stem) stem = "asset";
+  const maxStemLength = Math.max(1, 120 - extension.length);
+  return `${stem.slice(0, maxStemLength)}${extension}`;
+}
+
+export function promptAgentAssetPath(filename: string, existingPaths: Iterable<string>): string {
+  const safeName = sanitizeAssetFilename(filename);
+  const existing = new Set(existingPaths);
+  const extensionIndex = safeName.lastIndexOf(".");
+  const stem = extensionIndex > 0 ? safeName.slice(0, extensionIndex) : safeName;
+  const extension = extensionIndex > 0 ? safeName.slice(extensionIndex) : "";
+
+  let candidate = `assets/${safeName}`;
+  let index = 2;
+  while (existing.has(candidate)) {
+    candidate = `assets/${stem}-${index}${extension}`;
+    index += 1;
+  }
+  return candidate;
+}

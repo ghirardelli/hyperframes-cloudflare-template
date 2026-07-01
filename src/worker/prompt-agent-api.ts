@@ -12,6 +12,7 @@ import {
   promptAgentResultSchema,
   type GenerateHyperframeOutput,
   type MaterializeHyperframeComponentsOutput,
+  type PromptAgentAttachedAsset,
 } from "../lib/prompt-agent-contract";
 import {
   materializeHyperframeComponentsToolOutputSchema,
@@ -39,6 +40,7 @@ export interface PromptAgentChatOptions {
     projectId: string;
     placements: Array<MaterializeComponentPlacement>;
   }) => Promise<MaterializeHyperframeComponentsOutput>;
+  listProjectAssets?: (projectId: string) => Promise<Array<PromptAgentAttachedAsset>>;
 }
 
 export async function handlePromptAgentChat({
@@ -47,6 +49,7 @@ export async function handlePromptAgentChat({
   auth,
   generateHyperframe,
   materializeHyperframeComponents,
+  listProjectAssets,
 }: PromptAgentChatOptions): Promise<Response> {
   if (env.ENABLE_AI_GEN !== "true") {
     return jsonError(
@@ -85,6 +88,8 @@ export async function handlePromptAgentChat({
     forwardedWorkflowRunId: forwardedProps.workflowRunId,
     forwardedActiveWizardStageId: forwardedProps.activeWizardStageId,
     forwardedGalleryContext: forwardedProps.selectedGalleryContext,
+    forwardedAttachedAssets: forwardedProps.attachedAssets,
+    listProjectAssets,
     generateHyperframe: async (input) =>
       generateHyperframeOutputSchema.parse(await generateHyperframe(input)),
     materializeHyperframeComponents: async (input) =>
@@ -136,6 +141,7 @@ function buildPromptAgentSystemPrompt(
   const currentPrompt = forwardedProps.currentPrompt?.trim();
   const activeProject = forwardedProps.activeProjectTitle?.trim();
   const galleryContext = formatGalleryContext(forwardedProps.selectedGalleryContext);
+  const attachedAssets = formatAttachedAssets(forwardedProps.attachedAssets);
   return `You are the Motion Frames prompt agent. Help users turn rough ideas into precise prompts for HyperFrames animated HTML video generation.
 
 Active model: ${model}.
@@ -145,6 +151,7 @@ ${forwardedProps.activeWizardStageId ? `Active wizard stage: ${forwardedProps.ac
 ${forwardedProps.durationSec ? `Selected duration: ${forwardedProps.durationSec} seconds.` : "No selected duration was provided; default to 6 seconds unless the user asks otherwise."}
 ${currentPrompt ? `Current editable prompt:\n${currentPrompt}` : "No editable prompt was provided."}
 ${galleryContext}
+${attachedAssets}
 
 Rules:
 - Keep the conversation concise and practical.
@@ -152,7 +159,10 @@ Rules:
 - When route_hyperframes_workflow says shouldLoadSkills=true, load only these skills before preparing the final package: /hyperframes, the selected workflow, and the relevant domain skills in loadSkillIds.
 - Use get_hyperframes_guidelines before claiming any HyperFrames prompt is generation-ready.
 - Use inspect_project_context when project context would materially improve the prompt.
+- Use list_project_assets when attached or project asset context would materially improve the prompt.
 - Use prepare_prompt_package to validate final prompt packages.
+- Attached project assets are trusted only by exact assets/ paths listed in the prompt context or returned by list_project_assets.
+- Never invent asset paths, arbitrary CDN asset URLs, or media files that the project has not uploaded.
 - If selected gallery context is present, incorporate the examples and components where relevant, preserving exact component names and prompt text vocabulary instead of paraphrasing them away.
 - When a selected component is marked as a trusted materializable HyperFrames component, reference it by component id and placement only. Do not write, imitate, or recreate its internal composition HTML.
 - Use set_draft_prompt when the user wants the draft applied to the editable prompt.
@@ -199,6 +209,21 @@ function formatGalleryContext(
     }),
   ];
   return lines.join("\n");
+}
+
+function formatAttachedAssets(
+  assets: ReturnType<typeof normalizePromptAgentForwardedProps>["attachedAssets"],
+): string {
+  if (!assets?.length) return "No attached project assets were provided.";
+  return [
+    "Attached project assets:",
+    ...assets.map((asset) => {
+      const details = [asset.contentType, `${asset.size} bytes`];
+      if (asset.originalName) details.push(`original: ${asset.originalName}`);
+      if (asset.description) details.push(asset.description);
+      return `- ${asset.path} (${details.join(", ")})`;
+    }),
+  ].join("\n");
 }
 
 function jsonError(message: string, status: number): Response {

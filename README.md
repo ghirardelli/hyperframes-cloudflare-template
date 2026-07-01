@@ -34,6 +34,9 @@ Fill these values in `.dev.vars`:
 ```bash
 OPENROUTER_API_KEY="sk-or-v1-..."
 # OPENROUTER_MODEL="google/gemini-3-flash-preview"
+# Optional prompt-agent voice transcription:
+# OPENAI_API_KEY="sk-..."
+# OPENAI_TRANSCRIPTION_MODEL="whisper-1"
 DATABASE_URL="postgresql://USER:PASSWORD@HOST.neon.tech/neondb?sslmode=require"
 BETTER_AUTH_SECRET="replace-with-a-long-random-secret"
 BETTER_AUTH_URL="http://localhost:5173"
@@ -46,6 +49,8 @@ For production, store secrets with Cloudflare:
 
 ```bash
 wrangler secret put OPENROUTER_API_KEY
+# Optional, enables prompt-agent microphone transcription:
+wrangler secret put OPENAI_API_KEY
 wrangler secret put DATABASE_URL
 wrangler secret put BETTER_AUTH_SECRET
 wrangler secret put BETTER_AUTH_URL
@@ -53,8 +58,8 @@ wrangler secret put BETTER_AUTH_URL
 wrangler secret put BETTER_AUTH_API_KEY
 ```
 
-`OPENROUTER_MODEL` can stay in `wrangler.jsonc` vars if you want a non-default
-model.
+`OPENROUTER_MODEL` and `OPENAI_TRANSCRIPTION_MODEL` can stay in `wrangler.jsonc`
+vars if you want non-default models.
 
 ### HyperFrames Skill Catalog
 

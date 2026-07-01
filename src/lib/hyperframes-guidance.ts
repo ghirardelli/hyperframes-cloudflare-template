@@ -33,6 +33,7 @@ export function getHyperframesGuidelines(): HyperframesGuidelines {
       "GSAP CDN",
       "HyperFrames runtime CDN",
       "Google Fonts via a stylesheet link",
+      "Project-scoped assets/ files uploaded through the chat attachment flow",
     ],
     forbiddenPatterns: [
       "External images, video, audio, or arbitrary CDN assets.",

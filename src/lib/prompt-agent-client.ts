@@ -109,6 +109,8 @@ export function promptAgentToolLabel(name: string): string {
       return "Load skill";
     case "inspect_project_context":
       return "Project context";
+    case "list_project_assets":
+      return "Project assets";
     case "prepare_prompt_package":
       return "Prompt package";
     case "generate_hyperframe":

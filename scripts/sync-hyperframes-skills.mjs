@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const DEFAULT_REPO_URL = "https://github.com/aaronpie/hyperframes.git";
+const DEFAULT_REPO_URL = "https://github.com/heygen-com/hyperframes.git";
 const DEFAULT_REF = "main";
 const DEFAULT_OUTPUT = "src/generated/hyperframes-skills.ts";
 const REQUIRED_SKILL_IDS = [

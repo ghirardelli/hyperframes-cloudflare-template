@@ -15,7 +15,7 @@ import {
   materializedComponentManifestSchema,
   type MaterializedComponentManifest,
 } from "../lib/hyperframe-component-materializer-schema";
-import { normalizeProjectPath } from "../lib/project-paths";
+import { normalizeProjectPath, promptAgentAssetPath } from "../lib/project-paths";
 import { projectWorkspaceKey, readProjectObject, writeProjectObject } from "../lib/project-storage";
 import type { WorkerEnv } from "./render-api";
 
@@ -27,6 +27,14 @@ const PREVIEW_HEADERS = {
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_ASSET_BYTES = 25 * 1024 * 1024;
+const PROMPT_AGENT_ATTACHMENT_TYPES = [
+  /^image\//i,
+  /^video\//i,
+  /^audio\//i,
+  /^font\//i,
+  /^text\//i,
+  /^application\/(pdf|json|zip|x-zip-compressed|octet-stream)$/i,
+];
 
 const MIME_TYPES: Record<string, string> = {
   html: "text/html; charset=utf-8",
@@ -83,7 +91,7 @@ export async function handleStudioFilesApi(
   pathname: string,
   context: AppAuthContext,
 ): Promise<Response | null> {
-  const base = pathname.match(/^\/api\/projects\/([^/]+)\/(files|assets|duplicate-file|preview)(?:\/(.*))?$/);
+  const base = pathname.match(/^\/api\/projects\/([^/]+)\/(files|assets|agent-assets|duplicate-file|preview)(?:\/(.*))?$/);
   if (!base) return null;
   const projectId = decodeURIComponent(base[1]);
   const kind = base[2];
@@ -268,76 +276,13 @@ export async function handleStudioFilesApi(
         if (!rawPath) return jsonError("missing ?path", 400);
         const path = safePath(rawPath);
         const bytes = new Uint8Array(await req.arrayBuffer());
-        if (bytes.byteLength > MAX_ASSET_BYTES) return jsonError("asset too large", 413);
         const contentType = req.headers.get("content-type") || mimeForPath(path);
-        const key = projectWorkspaceKey({
-          organizationId: orgId,
-          ownerId: project.ownerId,
-          projectId,
+        const item = await uploadProjectAsset(env, db, context, project, {
           path,
-        });
-        const stored = await writeProjectObject(env, { key, bytes, contentType });
-        const entryId = await upsertProjectEntry(db, context, project, {
-          path,
-          kind: "binary",
-          artifactRole: artifactRoleForPath(path),
-          storageProvider: stored.provider,
-          storageKey: stored.key,
+          bytes,
           contentType,
-          size: bytes.byteLength,
-          sha256: stored.sha256,
-          searchText: path,
         });
-        await recordEntryVersion(db, context, project, {
-          entryId,
-          path,
-          kind: "binary",
-          artifactRole: artifactRoleForPath(path),
-          storageProvider: stored.provider,
-          storageKey: stored.key,
-          contentType,
-          size: bytes.byteLength,
-          sha256: stored.sha256,
-          changeKind: "upload",
-        });
-        await db
-          .insert(projectAssets)
-          .values({
-            id: crypto.randomUUID(),
-            projectId,
-            organizationId: orgId,
-            path,
-            r2Key: stored.provider === "r2" ? stored.key : null,
-            entryId,
-            storageProvider: stored.provider,
-            storageKey: stored.key,
-            artifactRole: artifactRoleForPath(path),
-            sha256: stored.sha256,
-            contentType,
-            size: bytes.byteLength,
-            createdById: context.user.id,
-            updatedAt: new Date(),
-          })
-          .onConflictDoUpdate({
-            target: [projectAssets.projectId, projectAssets.path],
-            set: {
-              r2Key: stored.provider === "r2" ? stored.key : null,
-              entryId,
-              storageProvider: stored.provider,
-              storageKey: stored.key,
-              artifactRole: artifactRoleForPath(path),
-              sha256: stored.sha256,
-              contentType,
-              size: bytes.byteLength,
-              updatedAt: new Date(),
-            },
-          });
-        return Response.json({
-          path,
-          url: `/api/projects/${encodeURIComponent(projectId)}/assets/${path}`,
-          contentType,
-          size: bytes.byteLength,
-        });
+        return Response.json(item);
       }
       return jsonError("method not allowed", 405);
     }
@@ -345,6 +290,33 @@ export async function handleStudioFilesApi(
       return await serveAsset(env, db, orgId, projectId, safePath(rest));
     }
     return jsonError("method not allowed", 405);
+  }
+
+  if (kind === "agent-assets") {
+    if (method !== "POST") return jsonError("method not allowed", 405);
+    const url = new URL(req.url);
+    const filename = url.searchParams.get("filename");
+    if (!filename) return jsonError("missing ?filename", 400);
+    const declaredLength = Number(req.headers.get("content-length") ?? 0);
+    if (declaredLength > MAX_ASSET_BYTES) return jsonError("asset too large", 413);
+    const contentType = req.headers.get("content-type") || mimeForPath(filename);
+    if (!isPromptAgentAttachmentType(contentType)) {
+      return jsonError("unsupported attachment type", 415);
+    }
+    const existingRows = await db
+      .select({ path: projectAssets.path })
+      .from(projectAssets)
+      .where(and(eq(projectAssets.projectId, projectId), eq(projectAssets.organizationId, orgId)))
+      .orderBy(asc(projectAssets.path));
+    const path = promptAgentAssetPath(filename, existingRows.map((row) => row.path));
+    const bytes = new Uint8Array(await req.arrayBuffer());
+    if (bytes.byteLength > MAX_ASSET_BYTES) return jsonError("asset too large", 413);
+    const item = await uploadProjectAsset(env, db, context, project, {
+      path,
+      bytes,
+      contentType,
+    });
+    return Response.json(item);
   }
 
   if (kind === "preview") {
@@ -513,6 +485,96 @@ export async function upsertProjectFile(
       target: [projectFiles.projectId, projectFiles.path],
       set: { content, updatedAt: new Date() },
     });
+}
+
+export async function uploadProjectAsset(
+  env: WorkerEnv,
+  db: ReturnType<typeof createDb>,
+  context: AppAuthContext,
+  project: typeof projects.$inferSelect,
+  input: {
+    path: string;
+    bytes: Uint8Array;
+    contentType: string;
+  },
+): Promise<{ path: string; url: string; contentType: string; size: number }> {
+  const path = safePath(input.path);
+  if (!path.startsWith("assets/")) return Promise.reject(new Error("asset path must be under assets/"));
+  if (input.bytes.byteLength > MAX_ASSET_BYTES) {
+    throw new Error("asset too large");
+  }
+  const key = projectWorkspaceKey({
+    organizationId: context.organization.id,
+    ownerId: project.ownerId,
+    projectId: project.id,
+    path,
+  });
+  const stored = await writeProjectObject(env, {
+    key,
+    bytes: input.bytes,
+    contentType: input.contentType,
+  });
+  const entryId = await upsertProjectEntry(db, context, project, {
+    path,
+    kind: "binary",
+    artifactRole: artifactRoleForPath(path),
+    storageProvider: stored.provider,
+    storageKey: stored.key,
+    contentType: input.contentType,
+    size: input.bytes.byteLength,
+    sha256: stored.sha256,
+    searchText: path,
+  });
+  await recordEntryVersion(db, context, project, {
+    entryId,
+    path,
+    kind: "binary",
+    artifactRole: artifactRoleForPath(path),
+    storageProvider: stored.provider,
+    storageKey: stored.key,
+    contentType: input.contentType,
+    size: input.bytes.byteLength,
+    sha256: stored.sha256,
+    changeKind: "upload",
+  });
+  await db
+    .insert(projectAssets)
+    .values({
+      id: crypto.randomUUID(),
+      projectId: project.id,
+      organizationId: context.organization.id,
+      path,
+      r2Key: stored.provider === "r2" ? stored.key : null,
+      entryId,
+      storageProvider: stored.provider,
+      storageKey: stored.key,
+      artifactRole: artifactRoleForPath(path),
+      sha256: stored.sha256,
+      contentType: input.contentType,
+      size: input.bytes.byteLength,
+      createdById: context.user.id,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [projectAssets.projectId, projectAssets.path],
+      set: {
+        r2Key: stored.provider === "r2" ? stored.key : null,
+        entryId,
+        storageProvider: stored.provider,
+        storageKey: stored.key,
+        artifactRole: artifactRoleForPath(path),
+        sha256: stored.sha256,
+        contentType: input.contentType,
+        size: input.bytes.byteLength,
+        updatedAt: new Date(),
+      },
+    });
+  return {
+    path,
+    url: `/api/projects/${encodeURIComponent(project.id)}/assets/${path}`,
+    contentType: input.contentType,
+    size: input.bytes.byteLength,
+  };
 }
 
 async function upsertProjectEntry(
@@ -805,6 +867,11 @@ function artifactRoleForPath(path: string): string {
   if (/storyboard/i.test(path)) return "storyboard";
   if (/script/i.test(path)) return "script";
   return "source";
+}
+
+function isPromptAgentAttachmentType(contentType: string): boolean {
+  const normalized = contentType.split(";")[0]?.trim() ?? "";
+  return PROMPT_AGENT_ATTACHMENT_TYPES.some((pattern) => pattern.test(normalized));
 }
 
 function projectEntryId(projectId: string, path: string): string {

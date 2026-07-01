@@ -509,6 +509,8 @@ function MotionFramesHome() {
                   aiEnabled={aiEnabled}
                   isConfigReady={isConfigReady}
                   modelLabel={modelLabel}
+                  voiceInputEnabled={configQuery.data?.voiceInputEnabled ?? false}
+                  transcriptionProviderLabel={configQuery.data?.transcriptionProviderLabel ?? null}
                   activeProjectId={activeProjectId}
                   activeProjectTitle={activeProjectTitle}
                   selectedGalleryContext={selectedGalleryContext}

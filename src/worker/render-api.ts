@@ -1,5 +1,5 @@
 import { getContainer } from "@cloudflare/containers";
-import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 
 import { createAuth } from "../auth";
 import manifest from "../composition-manifest.json";
@@ -43,6 +43,7 @@ import {
 } from "../lib/bunny";
 import { DEFAULT_MODEL, generateComposition, GenerateError } from "../lib/generate";
 import { normalizeSelectedGalleryPromptContext, type SelectedGalleryPromptContext } from "../lib/hyperframe-gallery-catalog";
+import type { PromptAgentAttachedAsset } from "../lib/prompt-agent-contract";
 import {
   MATERIALIZED_COMPONENT_MANIFEST_PATH,
   materializeTrustedHyperframeComponents,
@@ -58,8 +59,13 @@ import {
 } from "../lib/project-storage";
 import { handleStudioFilesApi, renderProjectPreview, upsertProjectFile } from "./studio-files-api";
 import { handlePromptAgentChat } from "./prompt-agent-api";
+import { handlePromptAgentTranscription } from "./prompt-agent-transcription-api";
 import { handleWorkflowApi, type WorkflowExecutionContext } from "./workflow-api";
 import { isWebsiteToVideoWorkflowEnabled } from "../lib/website-to-video-workflow";
+import {
+  isPromptAgentTranscriptionConfigured,
+  promptAgentTranscriptionModel,
+} from "../lib/prompt-agent-transcription-provider";
 
 export interface WorkerEnv extends TenantAuthEnv, BunnyEnv {
   ASSETS: Fetcher;
@@ -75,6 +81,10 @@ export interface WorkerEnv extends TenantAuthEnv, BunnyEnv {
   OPENROUTER_API_KEY?: string;
   /** Optional OpenRouter model override. */
   OPENROUTER_MODEL?: string;
+  /** Server-side OpenAI API key used for prompt-agent transcription. */
+  OPENAI_API_KEY?: string;
+  /** Optional OpenAI transcription model override. */
+  OPENAI_TRANSCRIPTION_MODEL?: string;
 }
 
 const PREVIEW_HEADERS = {
@@ -86,7 +96,6 @@ const PREVIEW_HEADERS = {
 const MAX_GENERATE_PROMPT_BYTES = 8 * 1024;
 const MAX_RENDER_HTML_BYTES = 2 * 1024 * 1024;
 const DASH_ORIGIN = "https://dash.better-auth.com";
-
 const ENCODER = new TextEncoder();
 
 export async function handleWorkerApi(
@@ -116,6 +125,8 @@ export async function handleWorkerApi(
       {
         aiGenEnabled: env.ENABLE_AI_GEN === "true",
         websiteToVideoWorkflowEnabled: isWebsiteToVideoWorkflowEnabled(env),
+        voiceInputEnabled: isVoiceInputEnabled(env),
+        transcriptionProviderLabel: transcriptionProviderLabel(env),
         modelLabel: env.OPENROUTER_MODEL?.trim() || DEFAULT_MODEL,
       },
       { headers: { "cache-control": "no-store" } },
@@ -134,7 +145,16 @@ export async function handleWorkerApi(
       generateHyperframe: (body) => generateAndPersistComposition(env, req, auth, body),
       materializeHyperframeComponents: (body) =>
         materializeHyperframeComponentsForProject(env, auth, body),
+      listProjectAssets: (projectId) => listProjectAssetsForAgent(env, auth, projectId),
     });
+  }
+
+  if (req.method === "POST" && pathname === "/api/agent/transcribe") {
+    const auth = await protectedContext(req, env);
+    if (auth instanceof Response) return auth;
+    const tenant = requireTenantOrganization(auth);
+    if (tenant) return tenant;
+    return handlePromptAgentTranscription({ env, req, auth });
   }
 
   const appApiResponse = await handleAppApi(env, req, pathname, ctx);
@@ -170,6 +190,15 @@ export async function handleWorkerApi(
   }
 
   return null;
+}
+
+function isVoiceInputEnabled(env: WorkerEnv): boolean {
+  return isPromptAgentTranscriptionConfigured(env);
+}
+
+function transcriptionProviderLabel(env: WorkerEnv): string | null {
+  if (!isVoiceInputEnabled(env)) return null;
+  return promptAgentTranscriptionModel(env);
 }
 
 function isJsonRequest(req: Request): boolean {
@@ -809,6 +838,30 @@ async function materializeHyperframeComponentsForProject(
   };
 }
 
+async function listProjectAssetsForAgent(
+  env: WorkerEnv,
+  context: AppAuthContext,
+  projectId: string,
+): Promise<Array<PromptAgentAttachedAsset>> {
+  const project = await requireProjectAccess(context, projectId, env);
+  const rows = await createDb(env)
+    .select({
+      path: projectAssets.path,
+      contentType: projectAssets.contentType,
+      size: projectAssets.size,
+    })
+    .from(projectAssets)
+    .where(and(eq(projectAssets.projectId, project.id), eq(projectAssets.organizationId, context.organization.id)))
+    .orderBy(asc(projectAssets.path));
+
+  return rows.map((row) => ({
+    path: row.path,
+    url: `/api/projects/${encodeURIComponent(project.id)}/assets/${row.path}`,
+    contentType: row.contentType,
+    size: row.size,
+  }));
+}
+
 async function recordRenderEntry(
   env: WorkerEnv,
   context: AppAuthContext,
@@ -1050,7 +1103,7 @@ async function handleAppApi(
     }
 
     // Multi-file Studio file/asset/preview-subpath routes (D1 + R2).
-    if (/^\/api\/projects\/[^/]+\/(files|assets|duplicate-file|preview\/)/.test(pathname)) {
+    if (/^\/api\/projects\/[^/]+\/(files|assets|agent-assets|duplicate-file|preview\/)/.test(pathname)) {
       const tenant = requireTenantOrganization(auth);
       if (tenant) return tenant;
       const studioResp = await handleStudioFilesApi(env, req, pathname, auth);

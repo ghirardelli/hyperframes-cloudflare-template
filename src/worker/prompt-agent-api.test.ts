@@ -4,6 +4,7 @@ const apiMocks = vi.hoisted(() => ({
   requireAuthContext: vi.fn(),
   chatParamsFromRequest: vi.fn(),
   chat: vi.fn(),
+  generateTranscription: vi.fn(),
   mergeAgentTools: vi.fn((serverTools: Array<unknown>, clientTools: Array<unknown>) => [
     ...serverTools,
     ...clientTools,
@@ -30,6 +31,7 @@ vi.mock("@cloudflare/containers", () => ({
 vi.mock("@tanstack/ai", () => ({
   chatParamsFromRequest: apiMocks.chatParamsFromRequest,
   chat: apiMocks.chat,
+  generateTranscription: apiMocks.generateTranscription,
   mergeAgentTools: apiMocks.mergeAgentTools,
   toServerSentEventsResponse: apiMocks.toServerSentEventsResponse,
 }));
@@ -95,6 +97,14 @@ function mockAgentParams() {
       currentPrompt: "A launch reel",
       durationSec: 8,
       activeProjectTitle: "Launch Reel",
+      attachedAssets: [
+        {
+          path: "assets/logo.png",
+          url: "/api/projects/project-1/assets/assets/logo.png",
+          contentType: "image/png",
+          size: 123,
+        },
+      ],
       selectedGalleryContext: {
         examples: [
           {
@@ -219,6 +229,9 @@ describe("prompt agent worker route", () => {
           forwardedPrompt: "A launch reel",
           forwardedDurationSec: 8,
           forwardedActiveProjectTitle: "Launch Reel",
+          forwardedAttachedAssets: [
+            expect.objectContaining({ path: "assets/logo.png", contentType: "image/png" }),
+          ],
           forwardedGalleryContext: expect.objectContaining({
             examples: expect.arrayContaining([
               expect.objectContaining({ name: "HyperFrames Launch Video" }),
@@ -237,8 +250,12 @@ describe("prompt agent worker route", () => {
     expect(chatConfig.systemPrompts[0]).toContain("Selected gallery context:");
     expect(chatConfig.systemPrompts[0]).toContain("Component: Code 3D Extrude");
     expect(chatConfig.systemPrompts[0]).toContain("preserving exact component names");
+    expect(chatConfig.systemPrompts[0]).toContain("Attached project assets:");
+    expect(chatConfig.systemPrompts[0]).toContain("assets/logo.png");
+    expect(chatConfig.systemPrompts[0]).toContain("Never invent asset paths");
     expect(chatConfig.tools.map((tool: { name: string }) => tool.name)).toEqual(
       expect.arrayContaining([
+        "list_project_assets",
         "list_hyperframes_skill_catalog",
         "route_hyperframes_workflow",
         "load_hyperframes_skill",

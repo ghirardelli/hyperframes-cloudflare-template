@@ -293,4 +293,208 @@ describe("studio multi-file API", () => {
       }),
     );
   });
+
+  it("uploads prompt-agent attachments with sanitized collision-free asset paths", async () => {
+    const fetchMock = vi.fn(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    mocks.selectRows = [
+      [{ id: "p1", organizationId: "org-1", ownerId: "user-1", visibility: "private" }],
+      [{ path: "assets/logo-final.png" }, { path: "assets/logo-final-2.png" }],
+    ];
+
+    const res = await handleWorkerApi(
+      new Request("https://mf.test/api/projects/p1/agent-assets?filename=Logo Final!.PNG", {
+        method: "POST",
+        headers: { "content-type": "image/png" },
+        body: "PNG",
+      }),
+      {
+        ...env,
+        BUNNY_STORAGE_ZONE_NAME: "zone",
+        BUNNY_STORAGE_ACCESS_KEY: "storage-secret",
+        BUNNY_STORAGE_ENDPOINT: "https://la.storage.bunnycdn.com",
+      },
+    );
+
+    expect(res?.status).toBe(200);
+    await expect(res?.json()).resolves.toMatchObject({
+      path: "assets/logo-final-3.png",
+      contentType: "image/png",
+      size: 3,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://la.storage.bunnycdn.com/zone/orgs/org-1/users/user-1/projects/p1/workspace/assets/logo-final-3.png",
+      expect.objectContaining({ method: "PUT" }),
+    );
+    expect(mocks.inserts).toContainEqual(
+      expect.objectContaining({
+        path: "assets/logo-final-3.png",
+        storageProvider: "bunny-storage",
+      }),
+    );
+  });
+
+  it("lists prompt-agent-uploaded assets in Studio file and asset views", async () => {
+    mocks.selectRows = [
+      [{ id: "p1", organizationId: "org-1" }],
+      [
+        {
+          path: "assets/logo.png",
+          kind: "binary",
+          artifactRole: "asset",
+          contentType: "image/png",
+          size: 123,
+        },
+      ],
+      [],
+    ];
+
+    const filesRes = await handleWorkerApi(
+      new Request("https://mf.test/api/projects/p1/files"),
+      env,
+    );
+
+    expect(filesRes?.status).toBe(200);
+    await expect(filesRes?.json()).resolves.toMatchObject({
+      entries: [
+        {
+          path: "assets/logo.png",
+          kind: "binary",
+          artifactRole: "asset",
+          contentType: "image/png",
+          size: 123,
+        },
+      ],
+    });
+
+    mocks.selectRows = [
+      [{ id: "p1", organizationId: "org-1" }],
+      [
+        {
+          path: "assets/logo.png",
+          contentType: "image/png",
+          size: 123,
+        },
+      ],
+    ];
+
+    const assetsRes = await handleWorkerApi(
+      new Request("https://mf.test/api/projects/p1/assets"),
+      env,
+    );
+
+    expect(assetsRes?.status).toBe(200);
+    await expect(assetsRes?.json()).resolves.toEqual({
+      assets: [
+        {
+          path: "assets/logo.png",
+          url: "/api/projects/p1/assets/assets/logo.png",
+          contentType: "image/png",
+          size: 123,
+        },
+      ],
+    });
+  });
+
+  it("serves prompt-agent-uploaded assets through project asset and preview routes", async () => {
+    const getObject = vi.fn(async () => ({
+      body: new Response("PNG").body,
+      httpEtag: "asset-etag",
+      writeHttpMetadata: (headers: Headers) => headers.set("content-type", "image/png"),
+    }));
+    const envWithR2 = {
+      ...env,
+      RENDERS: { get: getObject },
+    } as unknown as WorkerEnv;
+
+    mocks.selectRows = [
+      [{ id: "p1", organizationId: "org-1" }],
+      [
+        {
+          r2Key: "assets/orgs/org-1/users/user-1/projects/p1/workspace/assets/logo.png",
+          storageProvider: "r2",
+          storageKey: "assets/orgs/org-1/users/user-1/projects/p1/workspace/assets/logo.png",
+          contentType: "image/png",
+        },
+      ],
+    ];
+
+    const assetRes = await handleWorkerApi(
+      new Request("https://mf.test/api/projects/p1/assets/assets%2Flogo.png"),
+      envWithR2,
+    );
+
+    expect(assetRes?.status).toBe(200);
+    expect(assetRes?.headers.get("content-type")).toBe("image/png");
+    await expect(assetRes?.text()).resolves.toBe("PNG");
+    expect(getObject).toHaveBeenCalledWith(
+      "assets/orgs/org-1/users/user-1/projects/p1/workspace/assets/logo.png",
+    );
+
+    mocks.selectRows = [
+      [{ id: "p1", organizationId: "org-1" }],
+      [],
+      [
+        {
+          r2Key: "assets/orgs/org-1/users/user-1/projects/p1/workspace/assets/logo.png",
+          storageProvider: "r2",
+          storageKey: "assets/orgs/org-1/users/user-1/projects/p1/workspace/assets/logo.png",
+          contentType: "image/png",
+        },
+      ],
+    ];
+
+    const previewRes = await handleWorkerApi(
+      new Request("https://mf.test/api/projects/p1/preview/assets%2Flogo.png"),
+      envWithR2,
+    );
+
+    expect(previewRes?.status).toBe(200);
+    expect(previewRes?.headers.get("content-type")).toBe("image/png");
+    await expect(previewRes?.text()).resolves.toBe("PNG");
+  });
+
+  it("denies inaccessible prompt-agent-uploaded asset requests before reading storage", async () => {
+    const getObject = vi.fn();
+    mocks.selectRows = [[{ id: "p1", organizationId: "org-2" }]];
+
+    const res = await handleWorkerApi(
+      new Request("https://mf.test/api/projects/p1/assets/assets%2Flogo.png"),
+      { ...env, RENDERS: { get: getObject } } as unknown as WorkerEnv,
+    );
+
+    expect(res?.status).toBe(403);
+    expect(getObject).not.toHaveBeenCalled();
+  });
+
+  it("rejects prompt-agent attachments that exceed size or type limits", async () => {
+    mocks.selectRows = [
+      [{ id: "p1", organizationId: "org-1", ownerId: "user-1", visibility: "private" }],
+      [{ id: "p1", organizationId: "org-1", ownerId: "user-1", visibility: "private" }],
+    ];
+
+    const tooLarge = await handleWorkerApi(
+      new Request("https://mf.test/api/projects/p1/agent-assets?filename=huge.png", {
+        method: "POST",
+        headers: {
+          "content-type": "image/png",
+          "content-length": String(26 * 1024 * 1024),
+        },
+        body: "PNG",
+      }),
+      env,
+    );
+    expect(tooLarge?.status).toBe(413);
+
+    const badType = await handleWorkerApi(
+      new Request("https://mf.test/api/projects/p1/agent-assets?filename=setup.exe", {
+        method: "POST",
+        headers: { "content-type": "application/x-msdownload" },
+        body: "EXE",
+      }),
+      env,
+    );
+    expect(badType?.status).toBe(415);
+    expect(mocks.inserts).toEqual([]);
+  });
 });

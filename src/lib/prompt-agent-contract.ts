@@ -24,6 +24,48 @@ import {
   workflowStagePatchProposalSchema,
   proposeWorkflowStagePatchInputSchema,
 } from "./pipeline-wizard";
+import { normalizeProjectPath } from "./project-paths";
+
+const projectAssetPathSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(500)
+  .refine(isProjectAssetPath, "attached assets must be stored under assets/")
+  .overwrite(normalizeProjectAssetPath);
+
+export const promptAgentAttachedAssetSchema = z.object({
+  path: projectAssetPathSchema,
+  url: z.string().max(2_000).optional(),
+  contentType: z.string().trim().min(1).max(160),
+  size: z.number().int().min(0).max(25 * 1024 * 1024),
+  originalName: z.string().trim().min(1).max(240).optional(),
+  description: z.string().trim().max(1_000).optional(),
+  transcript: z.string().trim().max(10_000).optional(),
+});
+
+export type PromptAgentAttachedAsset = z.infer<typeof promptAgentAttachedAssetSchema>;
+
+export const promptAgentTranscriptionRequestSchema = z.object({
+  audio: z.string().min(1),
+  mimeType: z.string().trim().min(1).max(120),
+  durationMs: z.number().int().min(1).max(5 * 60 * 1000).optional(),
+  language: z.string().trim().min(2).max(16).optional(),
+  prompt: z.string().trim().max(500).optional(),
+});
+
+export const promptAgentTranscriptionResultSchema = z.object({
+  text: z.string().trim().min(1).max(20_000),
+  language: z.string().trim().min(2).max(16).optional(),
+  durationSec: z.number().min(0).max(5 * 60).optional(),
+});
+
+export type PromptAgentTranscriptionRequest = z.infer<
+  typeof promptAgentTranscriptionRequestSchema
+>;
+export type PromptAgentTranscriptionResult = z.infer<
+  typeof promptAgentTranscriptionResultSchema
+>;
 
 export const promptAgentForwardedPropsSchema = z.object({
   projectId: z.string().trim().min(1).max(200).optional(),
@@ -31,6 +73,7 @@ export const promptAgentForwardedPropsSchema = z.object({
   durationSec: z.number().min(1).max(300).optional(),
   activeProjectTitle: z.string().max(160).optional(),
   selectedGalleryContext: selectedGalleryPromptContextSchema.optional(),
+  attachedAssets: z.array(promptAgentAttachedAssetSchema).max(24).optional(),
   workflowRunId: z.string().trim().min(1).max(200).optional(),
   activeWizardStageId: z.string().trim().min(1).max(80).optional(),
 });
@@ -111,6 +154,17 @@ export const projectContextOutputSchema = z.object({
   hasHtml: z.boolean(),
   htmlSummary: z.string(),
 });
+
+export const listProjectAssetsInputSchema = z.object({
+  projectId: z.string().trim().min(1).max(200).optional(),
+});
+
+export const listProjectAssetsOutputSchema = z.object({
+  projectId: z.string().nullable(),
+  assets: z.array(promptAgentAttachedAssetSchema).max(200),
+});
+
+export type ListProjectAssetsOutput = z.infer<typeof listProjectAssetsOutputSchema>;
 
 export const draftPromptInputSchema = z.object({
   title: z.string().max(120),
@@ -280,6 +334,13 @@ export const inspectProjectContextTool = toolDefinition({
   outputSchema: projectContextOutputSchema,
 });
 
+export const listProjectAssetsTool = toolDefinition({
+  name: "list_project_assets",
+  description: "Read-only. List project-scoped assets uploaded under assets/ that the agent may reference by path.",
+  inputSchema: listProjectAssetsInputSchema,
+  outputSchema: listProjectAssetsOutputSchema,
+});
+
 export const preparePromptPackageTool = toolDefinition({
   name: "prepare_prompt_package",
   description: "Validate and return a structured generation-ready prompt package.",
@@ -381,4 +442,21 @@ export const highlightAgentSectionTool = toolDefinition({
 export function normalizePromptAgentForwardedProps(value: unknown): PromptAgentForwardedProps {
   const parsed = promptAgentForwardedPropsSchema.safeParse(value);
   return parsed.success ? parsed.data : {};
+}
+
+function normalizeProjectAssetPath(value: string): string {
+  const normalized = normalizeProjectPath(value);
+  if (!normalized.startsWith("assets/")) {
+    throw new Error("attached assets must be stored under assets/");
+  }
+  return normalized;
+}
+
+function isProjectAssetPath(value: string): boolean {
+  try {
+    normalizeProjectAssetPath(value);
+    return true;
+  } catch {
+    return false;
+  }
 }

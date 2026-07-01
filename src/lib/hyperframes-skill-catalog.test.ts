@@ -10,10 +10,10 @@ import {
 } from "./hyperframes-skill-catalog";
 
 describe("hyperframes skill catalog", () => {
-  it("validates the generated private-fork catalog and required skills", () => {
+  it("validates the generated upstream catalog and required skills", () => {
     const catalog = getHyperframesSkillCatalog();
 
-    expect(catalog.source.repoUrl).toBe("https://github.com/aaronpie/hyperframes.git");
+    expect(catalog.source.repoUrl).toBe("https://github.com/heygen-com/hyperframes.git");
     expect(catalog.source.commitSha).toMatch(/^[a-f0-9]{40}$/);
     expect(findMissingRequiredHyperframesSkills(catalog)).toEqual([]);
     expect(catalog.skills.map((skill) => skill.id)).toEqual(
