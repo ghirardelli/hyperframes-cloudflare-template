@@ -1,5 +1,5 @@
 export const MAIN_PAGE_GRID_CLASS =
-  "grid w-full flex-1 grid-cols-1 items-start gap-6 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:px-8";
+  "grid w-full flex-1 grid-cols-1 items-start gap-6 px-4 py-4 sm:px-6 lg:h-[calc(100dvh_-_4rem)] lg:min-h-0 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-stretch lg:overflow-hidden lg:px-8";
 
 export const COMPONENT_FILTER_ROW_CLASS = "flex flex-wrap gap-1.5 pb-1";
 

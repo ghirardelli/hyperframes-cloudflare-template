@@ -12,6 +12,9 @@ describe("main page layout classes", () => {
   it("uses a 60/40 desktop grid and single-column mobile layout", () => {
     expect(MAIN_PAGE_GRID_CLASS).toContain("grid-cols-1");
     expect(MAIN_PAGE_GRID_CLASS).toContain("lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]");
+    expect(MAIN_PAGE_GRID_CLASS).toContain("lg:h-[calc(100dvh_-_4rem)]");
+    expect(MAIN_PAGE_GRID_CLASS).toContain("lg:min-h-0");
+    expect(MAIN_PAGE_GRID_CLASS).toContain("lg:items-stretch");
   });
 
   it("wraps compact component filters without horizontal scrolling", () => {

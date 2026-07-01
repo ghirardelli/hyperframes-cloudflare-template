@@ -129,6 +129,34 @@ afterEach(() => {
 });
 
 describe("PromptAgentPanel media inputs", () => {
+  it("keeps a long conversation in a scrollable thread above the composer", () => {
+    aiReactMocks.useChat.mockReturnValue({
+      addToolApprovalResponse: vi.fn(),
+      clear: vi.fn(),
+      error: undefined,
+      final: null,
+      isLoading: false,
+      messages: Array.from({ length: 16 }, (_, index) => ({
+        id: `message-${index}`,
+        role: index % 2 === 0 ? "user" : "assistant",
+        parts: [{ type: "text", content: `Thread message ${index + 1}` }],
+      })),
+      partial: null,
+      reload: vi.fn(),
+      sendMessage,
+      stop: vi.fn(),
+    });
+
+    renderPanel();
+
+    const thread = screen.getByRole("log", { name: /agent conversation/i });
+    const composer = screen.getByLabelText("Ask the agent");
+    expect(thread).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
+    expect(thread.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("Thread message 16")).toBeInTheDocument();
+    expect(composer).toBeInTheDocument();
+  });
+
   it("explains why voice input is unavailable when provider config or browser support is missing", async () => {
     const user = userEvent.setup();
     const unavailable = renderPanel({ voiceInputEnabled: false });

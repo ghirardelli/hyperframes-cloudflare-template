@@ -4,7 +4,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   Bot,
-  Clock3,
   Download,
   Film,
   Info,
@@ -48,7 +47,6 @@ import {
   DEFAULT_DURATION_SEC,
   DEFAULT_RENDER_FORMAT,
   DEFAULT_RENDER_RESOLUTION_ID,
-  DURATION_PRESETS,
   EXPORT_RESOLUTION_PRESETS,
   getExportResolutionPreset,
   normalizeDurationSec,
@@ -149,10 +147,6 @@ function MotionFramesHome() {
   const renderSourceDescription = hasGeneratedOutput
     ? "current generated HyperFrame"
     : "bundled default composition";
-  const durationOptions = useMemo(
-    () => Array.from(new Set([...DURATION_PRESETS, creationValues.durationSec])).sort((a, b) => a - b),
-    [creationValues.durationSec],
-  );
   const selectedGalleryContext = useMemo(
     () =>
       buildPromptContextFromIds({
@@ -356,7 +350,7 @@ function MotionFramesHome() {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col bg-background text-foreground">
+    <div className="flex min-h-dvh flex-col bg-background text-foreground lg:h-dvh lg:overflow-hidden">
       <AppHeader active="workspace" />
       <main className={MAIN_PAGE_GRID_CLASS}>
         <HyperframeGalleryWorkspace
@@ -379,8 +373,8 @@ function MotionFramesHome() {
           playerRef={playerRef}
         />
 
-        <aside className="flex min-w-0 flex-col gap-4">
-          <Card className="overflow-visible">
+        <aside className="flex min-w-0 flex-col gap-4 lg:min-h-0">
+          <Card className="flex overflow-visible lg:h-full lg:min-h-0 lg:flex-col">
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -409,7 +403,7 @@ function MotionFramesHome() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
               <div
                 role="tablist"
                 aria-label="Creation mode"
@@ -467,38 +461,6 @@ function MotionFramesHome() {
             onRemoveComponent={removeSelectedComponent}
             onUpdateComponentPlacementIntent={updateComponentPlacementIntent}
           />
-
-              {visibleCreationTab !== "render" ? (
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                  <div className="space-y-2">
-                    <Label htmlFor="duration">Duration</Label>
-                    <div className="relative">
-                      <Clock3 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                      <creationForm.Field name="durationSec">
-                        {(field) => (
-                          <select
-                            id="duration"
-                            value={field.state.value}
-                            onBlur={field.handleBlur}
-                            onChange={(event) => field.handleChange(normalizeDurationSec(event.target.value))}
-                            disabled={isGenerating || isRendering}
-                            className="h-10 w-full appearance-none rounded-md border border-input bg-background px-9 py-2 text-sm font-medium outline-none transition-colors focus-visible:border-foreground focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {durationOptions.map((seconds) => (
-                              <option key={seconds} value={seconds}>
-                                {formatDurationOption(seconds)}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </creationForm.Field>
-                    </div>
-                  </div>
-                  <div className="rounded-md border border-hairline bg-surface-card px-3 py-2 text-sm text-muted-foreground">
-                    Duration is used before generation so the motion timing and final beat fit the timeline.
-                  </div>
-                </div>
-              ) : null}
 
               {visibleCreationTab === "agent" ? (
                 <PromptAgentPanel
