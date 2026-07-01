@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import {
   MATERIALIZED_COMPONENT_MANIFEST_PATH,
   materializeTrustedHyperframeComponents,
 } from "./hyperframe-component-materializer";
+import { materializeHyperframeComponentsToolOutputSchema } from "./hyperframe-component-materializer-schema";
 
 const hostHtml = `<!doctype html>
 <html>
@@ -14,6 +16,10 @@ const hostHtml = `<!doctype html>
 </html>`;
 
 describe("hyperframe component materializer", () => {
+  it("exports the agent tool output schema to JSON Schema", () => {
+    expect(() => z.toJSONSchema(materializeHyperframeComponentsToolOutputSchema)).not.toThrow();
+  });
+
   it("copies trusted App Showcase files and injects a bounded host snippet", () => {
     const result = materializeTrustedHyperframeComponents({
       indexHtml: hostHtml,

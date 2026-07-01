@@ -19,4 +19,20 @@ describe("hyperframe gallery workspace helpers", () => {
       placementIntent: "Use this as the opening scene.",
     });
   });
+
+  it("preserves in-progress placement whitespace while typing", () => {
+    const context = buildPromptContextFromIds({
+      exampleIds: [],
+      componentIds: ["app-showcase"],
+      componentPlacementIntents: {
+        "app-showcase": "Opening scene ",
+      },
+    });
+
+    expect(context.components[0]?.materialization).toMatchObject({
+      state: "materializable",
+      componentId: "app-showcase",
+      placementIntent: "Opening scene ",
+    });
+  });
 });

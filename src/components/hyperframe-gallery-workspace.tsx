@@ -621,8 +621,8 @@ export function buildPromptContextFromIds(input: {
     .filter((component) => input.componentIds.includes(component.id))
     .map((component) => {
       const item = createSelectedComponentItem(component);
-      const placementIntent = input.componentPlacementIntents?.[component.id]?.trim();
-      if (placementIntent && item.materialization.state === "materializable") {
+      const placementIntent = input.componentPlacementIntents?.[component.id];
+      if (placementIntent?.trim() && item.materialization.state === "materializable") {
         item.materialization = {
           ...item.materialization,
           placementIntent,

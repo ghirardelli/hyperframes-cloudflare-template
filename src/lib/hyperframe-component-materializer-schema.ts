@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-import type {
-  TrustedComponentFileMetadata,
-  TrustedComponentSourceMetadata,
+import {
+  trustedComponentFileMetadataSchema,
+  trustedComponentSourceMetadataSchema,
 } from "./hyperframe-component-registry-schema";
 
 export const MATERIALIZED_COMPONENT_MANIFEST_PATH =
@@ -49,10 +49,10 @@ export const materializedComponentManifestSchema = z.object({
     componentId: z.string(),
     name: z.string(),
     installCommand: z.string(),
-    source: z.custom<TrustedComponentSourceMetadata>(),
+    source: trustedComponentSourceMetadataSchema,
     canonicalSnippet: z.string(),
     installedPaths: z.array(z.string()),
-    files: z.array(z.custom<TrustedComponentFileMetadata>()),
+    files: z.array(trustedComponentFileMetadataSchema),
     placements: z.array(materializedComponentPlacementSchema),
     materializedAt: z.string().datetime(),
   })),
