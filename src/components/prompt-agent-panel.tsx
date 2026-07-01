@@ -313,12 +313,31 @@ export function PromptAgentPanel({
       }
       return;
     }
-    if (!canRecordVoice) return;
+    const unavailableReason = getVoiceUnavailableReason({
+      canUseAgent,
+      configured: voiceInputEnabled,
+      supported: audioRecorder.isSupported,
+      transcribing: transcription.isLoading,
+    });
+    if (unavailableReason) {
+      setVoiceError(unavailableReason);
+      return;
+    }
     try {
       await audioRecorder.start();
     } catch (err) {
       setVoiceError(messageFromError(err));
     }
+  }
+
+  function handleAttachmentButtonClick() {
+    if (hasUploadingAttachments) return;
+    if (!canUploadAttachments) {
+      setAttachmentError(getAttachmentUnavailableReason({ canUseAgent, activeProjectId }));
+      return;
+    }
+    setAttachmentError(null);
+    fileInputRef.current?.click();
   }
 
   async function uploadAttachments(files: Array<File>) {
@@ -583,8 +602,10 @@ export function PromptAgentPanel({
             type="button"
             variant="secondary"
             aria-label={canUploadAttachments ? "Open attachment picker" : "Attachment upload unavailable"}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!canUploadAttachments || hasUploadingAttachments}
+            aria-disabled={!canUploadAttachments || hasUploadingAttachments}
+            className={cn(!canUploadAttachments && "opacity-70")}
+            onClick={handleAttachmentButtonClick}
+            disabled={hasUploadingAttachments}
             title={
               canUploadAttachments
                 ? "Attach files"
@@ -602,7 +623,9 @@ export function PromptAgentPanel({
             variant="secondary"
             aria-label={voiceButtonLabel}
             onClick={handleVoiceInput}
-            disabled={!canRecordVoice && !audioRecorder.isRecording}
+            aria-disabled={!canRecordVoice && !audioRecorder.isRecording}
+            className={cn(!canRecordVoice && !audioRecorder.isRecording && "opacity-70")}
+            disabled={transcription.isLoading}
             title={
               voiceInputEnabled
                 ? transcriptionProviderLabel
@@ -927,6 +950,38 @@ function getVoiceButtonLabel({
   if (recording) return "Stop recording";
   if (transcribing) return "Transcribing audio";
   return "Start voice input";
+}
+
+function getVoiceUnavailableReason({
+  canUseAgent,
+  configured,
+  supported,
+  transcribing,
+}: {
+  canUseAgent: boolean;
+  configured: boolean;
+  supported: boolean;
+  transcribing: boolean;
+}): string | null {
+  if (transcribing) return "Audio is already being transcribed.";
+  if (!canUseAgent) return "AI prompt agent is offline. Enable AI generation before recording.";
+  if (!configured) {
+    return "Voice input needs OpenAI transcription. Set OPENAI_API_KEY, then optionally OPENAI_TRANSCRIPTION_MODEL.";
+  }
+  if (!supported) return "Microphone recording is not available in this browser.";
+  return null;
+}
+
+function getAttachmentUnavailableReason({
+  canUseAgent,
+  activeProjectId,
+}: {
+  canUseAgent: boolean;
+  activeProjectId: string;
+}): string {
+  if (!activeProjectId) return "Open or generate a project before attaching files.";
+  if (!canUseAgent) return "AI prompt agent is offline. Enable AI generation before attaching files.";
+  return "Attachment upload is unavailable right now.";
 }
 
 function makeAttachmentId(): string {

@@ -129,19 +129,31 @@ afterEach(() => {
 });
 
 describe("PromptAgentPanel media inputs", () => {
-  it("disables voice input when provider config is unavailable or browser recording is unsupported", () => {
+  it("explains why voice input is unavailable when provider config or browser support is missing", async () => {
+    const user = userEvent.setup();
     const unavailable = renderPanel({ voiceInputEnabled: false });
+    const unconfiguredButton = screen.getByRole("button", {
+      name: /voice input unavailable/i,
+    });
+    expect(unconfiguredButton).not.toBeDisabled();
+
+    await user.click(unconfiguredButton);
     expect(
-      screen.getByRole("button", { name: /voice input unavailable/i }),
-    ).toBeDisabled();
+      await screen.findByText(/Voice input needs OpenAI transcription/i),
+    ).toBeInTheDocument();
 
     unavailable.unmount();
     audioState.isSupported = false;
     renderPanel({ voiceInputEnabled: true });
+    const unsupportedButton = screen.getByRole("button", {
+      name: /microphone unavailable/i,
+    });
+    expect(unsupportedButton).not.toBeDisabled();
 
+    await user.click(unsupportedButton);
     expect(
-      screen.getByRole("button", { name: /microphone unavailable/i }),
-    ).toBeDisabled();
+      await screen.findByText(/Microphone recording is not available/i),
+    ).toBeInTheDocument();
   });
 
   it("records audio, transcribes it into editable text, and sends the reviewed transcript", async () => {
@@ -230,6 +242,10 @@ describe("PromptAgentPanel media inputs", () => {
     renderPanel({ activeProjectId: "" });
 
     expect(screen.getByLabelText("Attach files")).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /attachment upload unavailable/i }));
+    expect(
+      await screen.findByText("Open or generate a project before attaching files."),
+    ).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Ask the agent"), "Help with the prompt");
     await user.click(screen.getByRole("button", { name: /^send$/i }));
