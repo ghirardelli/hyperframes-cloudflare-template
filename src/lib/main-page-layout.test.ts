@@ -27,6 +27,9 @@ describe("main page layout classes", () => {
   it("uses a colored selected-context treatment with readable chips", () => {
     expect(SELECTED_CONTEXT_BOX_CLASS).toContain("bg-emerald-50");
     expect(SELECTED_CONTEXT_BOX_CLASS).toContain("border-emerald-200");
+    expect(SELECTED_CONTEXT_BOX_CLASS).toContain("max-h-56");
+    expect(SELECTED_CONTEXT_BOX_CLASS).toContain("overflow-y-auto");
+    expect(SELECTED_CONTEXT_BOX_CLASS).toContain("lg:max-h-[24dvh]");
     expect(SELECTED_CONTEXT_CHIP_CLASS).toContain("bg-white");
   });
 });
